@@ -244,214 +244,145 @@ camera:GetPropertyChangedSignal("FieldOfView"):Connect(function()
 end)
 
 
-LeftGroupBox:AddToggle("MyPseudoCodeToggle", {
-	Text = "夜视(有问题不能关闭)",
-	Default = false,
+-- 服务定义（放在最前面，防止找不到）
+local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- 1. 在这里定义外部变量，确保存储的数据不会因为函数重置而丢失
+local originalSettings = {
+    Ambient = nil,
+    Brightness = nil,
+    OutdoorAmbient = nil,
+    FogEnd = nil,
+    GlobalShadows = nil
+}
+
+local nvEffect = {
+    parts = {} -- 存储创建的特效部件
+}
+
+-- 2. 直接获取 AddToggle 的返回值 (local MyToggle)，不要用 Toggles.名字
+local MyToggle = LeftGroupBox:AddToggle("NightVisionToggle", {
+    Text = "夜视 (稳定版)",
+    Default = false,
+    Tooltip = "开启后增强环境光",
 })
-  
--- 夜视功能 - 修复关闭效果
-Toggles.MyPseudoCodeToggle:OnChanged(function(state)
-    -- 存储原始照明设置
-    local Lighting = game:GetService("Lighting")
-    local originalAmbient = Lighting.Ambient
-    local originalBrightness = Lighting.Brightness
-    local originalOutdoorAmbient = Lighting.OutdoorAmbient
-    
-    -- 夜视状态变量
-    local nightVisionEnabled = false
-    
-    -- 存储当前创建的滤镜和效果引用，确保只存在一个实例
-    local nightVision = {
-        overlay = nil,
-        frame = nil,
-        effect = nil,
-        vignette = nil
-    }
-    
-    -- 创建夜视滤镜
-    local function createNightVisionOverlay()
-        -- 如果已经存在滤镜，先销毁旧的
-        if nightVision.overlay and nightVision.overlay.Parent then
-            nightVision.overlay:Destroy()
-        end
-        if nightVision.effect and nightVision.effect.Parent then
-            nightVision.effect:Destroy()
-        end
-        
-        local overlay = Instance.new("ScreenGui")
-        overlay.Name = "NightVisionOverlay"
-        overlay.Parent = game:GetService("Players").LocalPlayer.PlayerGui
-        
-        -- 创建半透明白色滤镜
-        local frame = Instance.new("Frame")
-        frame.Size = UDim2.new(1, 0, 1, 0)
-        frame.BackgroundColor3 = Color3.fromRGB(240, 240, 255)  -- 更柔和的淡蓝色
-        frame.BackgroundTransparency = 0.85  -- 更透明，减少刺眼感
-        frame.ZIndex = 10
-        frame.Visible = false
-        frame.Parent = overlay
-        
-        -- 添加边缘变暗效果，使中心更亮
-        local vignette = Instance.new("ImageLabel")
-        vignette.Size = UDim2.new(1, 0, 1, 0)
-        vignette.BackgroundTransparency = 1
-        vignette.Image = "rbxassetid://154866808"  -- 渐变遮罩
-        vignette.ImageColor3 = Color3.fromRGB(0, 0, 0)
-        vignette.ImageTransparency = 0.85  -- 更透明的暗角
-        vignette.ZIndex = 11
-        vignette.Parent = frame
-        
-        -- 添加更柔和的颜色校正效果
-        local colorEffect = Instance.new("ColorCorrectionEffect")
-        colorEffect.Brightness = 0
-        colorEffect.Contrast = 0
-        colorEffect.Saturation = 0
-        colorEffect.TintColor = Color3.fromRGB(255, 255, 255)  -- 保持自然色调
-        colorEffect.Parent = Lighting
-        
-        -- 更新引用
-        nightVision.overlay = overlay
-        nightVision.frame = frame
-        nightVision.vignette = vignette
-        nightVision.effect = colorEffect
-        
-        return nightVision
-    end
-    
-    -- 平滑过渡函数
-    local function smoothTransition(from, to, duration, callback)
-        local start = tick()
-        local elapsed = 0
-        local success = true
-        
-        -- 添加安全检查，防止回调函数出错
-        local safeCallback = function(value)
-            local ok = pcall(function()
-                callback(value)
-            end)
-            if not ok then
-                success = false
+
+-- 3. 使用返回的 MyToggle 变量连接事件
+MyToggle:OnChanged(function()
+    -- 使用 pcall 包裹逻辑，防止内部错误导致整个脚本崩溃
+    local success, err = pcall(function()
+        local state = MyToggle.Value -- 获取当前开关状态
+
+        if state then
+            -- [开启夜视]
+            
+            -- 如果之前没有保存过，或者保存的数据为空，则保存当前环境
+            if originalSettings.Ambient == nil then
+                originalSettings.Ambient = Lighting.Ambient
+                originalSettings.Brightness = Lighting.Brightness
+                originalSettings.OutdoorAmbient = Lighting.OutdoorAmbient
+                originalSettings.FogEnd = Lighting.FogEnd
+                originalSettings.GlobalShadows = Lighting.GlobalShadows
             end
-        end
-        
-        while success and elapsed < duration do
-            elapsed = tick() - start
-            local progress = math.min(elapsed / duration, 1)
-            -- 使用平滑的缓动函数
-            local easedProgress = progress < 0.5 and 2*progress^2 or -1+(4-2*progress)*progress
-            
-            safeCallback(from + (to - from) * easedProgress)
-            task.wait()
-        end
-        
-        -- 确保最终值正确
-        if success then
-            safeCallback(to)
-        end
-    end
-    
-    -- 清理函数 - 确保所有效果都被移除
-    local function cleanupNightVision()
-        -- 直接恢复所有原始设置
-        Lighting.Ambient = originalAmbient
-        Lighting.Brightness = originalBrightness
-        Lighting.OutdoorAmbient = originalOutdoorAmbient
-        
-        -- 直接销毁所有效果，不等待过渡
-        if nightVision.effect and nightVision.effect.Parent then
-            nightVision.effect:Destroy()
-            nightVision.effect = nil
-        end
-        
-        if nightVision.overlay and nightVision.overlay.Parent then
-            nightVision.overlay:Destroy()
-            nightVision.overlay = nil
-            nightVision.frame = nil
-            nightVision.vignette = nil
-        end
-        
-        nightVisionEnabled = false
-    end
-    
-    -- 定义夜视功能切换函数
-    local function toggleNightVision(state)
-        if state == nightVisionEnabled then return end
-        nightVisionEnabled = state
-        
-        if nightVisionEnabled then
-            -- 先确保清理可能存在的旧效果
-            cleanupNightVision()
-            
-            -- 创建新的夜视效果
-            local nv = createNightVisionOverlay()
-            
-            -- 平滑启用夜视
-            smoothTransition(Lighting.Brightness, 1.2, 0.5, function(val)
-                Lighting.Brightness = val
-            end)
-            
-            smoothTransition(0, 0.3, 0.5, function(val)
-                if nv.effect and nv.effect.Parent then
-                    nv.effect.Brightness = val
-                    nv.effect.Contrast = val * 0.8
-                end
-            end)
-            
-            -- 增加环境光但保持自然
-            Lighting.Ambient = Color3.fromRGB(180, 180, 200)
-            Lighting.OutdoorAmbient = Color3.fromRGB(160, 160, 180)
-            
-            -- 渐显滤镜
-            nv.frame.Visible = true
-            smoothTransition(1, 0.85, 0.5, function(val)
-                if nv.frame and nv.frame.Parent then
-                    nv.frame.BackgroundTransparency = val
-                end
-            end)
-            
-            print("夜视功能已开启（柔和模式）")
+
+            -- 创建/应用夜视效果
+            Lighting.Ambient = Color3.fromRGB(120, 120, 120) -- 室内变亮
+            Lighting.OutdoorAmbient = Color3.fromRGB(120, 120, 120) -- 室外变亮
+            Lighting.Brightness = 2 -- 整体亮度
+            Lighting.FogEnd = 100000 -- 去除雾气
+            Lighting.GlobalShadows = false --以此获得极致亮度(可选)
+
+            -- 可选：添加颜色滤镜
+            if not nvEffect.cc then
+                local cc = Instance.new("ColorCorrectionEffect")
+                cc.Name = "NightVisionCC"
+                cc.Brightness = 0.2
+                cc.Contrast = 0.1
+                cc.Parent = Lighting
+                nvEffect.cc = cc
+            end
+
         else
-            -- 平滑禁用夜视，使用更快的过渡使关闭更明显
-            local currentBrightness = Lighting.Brightness
-            local currentEffectBrightness = nightVision.effect and nightVision.effect.Brightness or 0
+            -- [关闭夜视]
             
-            -- 先快速将滤镜变为完全透明，让用户明显感受到关闭
-            if nightVision.frame and nightVision.frame.Parent then
-                smoothTransition(nightVision.frame.BackgroundTransparency, 1, 0.3, function(val)
-                    if nightVision.frame and nightVision.frame.Parent then
-                        nightVision.frame.BackgroundTransparency = val
-                    end
-                end)
+            -- 清理滤镜
+            if nvEffect.cc then
+                nvEffect.cc:Destroy()
+                nvEffect.cc = nil
             end
-            
-            -- 同步降低亮度和效果
-            smoothTransition(currentBrightness, originalBrightness, 0.4, function(val)
-                Lighting.Brightness = val
-            end)
-            
-            smoothTransition(currentEffectBrightness, 0, 0.4, function(val)
-                if nightVision.effect and nightVision.effect.Parent then
-                    nightVision.effect.Brightness = val
-                    nightVision.effect.Contrast = 0
-                end
-            end)
-            
-            -- 等待一小段时间让用户看到过渡效果
-            task.wait(0.4)
-            
-            -- 完全恢复原始设置并清理
-            cleanupNightVision()
-            print("夜视功能已关闭")
+
+            -- 恢复原始设置 (只有在确实保存了设置的情况下才恢复)
+            if originalSettings.Ambient ~= nil then
+                Lighting.Ambient = originalSettings.Ambient
+                Lighting.Brightness = originalSettings.Brightness
+                Lighting.OutdoorAmbient = originalSettings.OutdoorAmbient
+                Lighting.FogEnd = originalSettings.FogEnd
+                Lighting.GlobalShadows = originalSettings.GlobalShadows
+                
+                -- 重置保存的设置，以便下次开启时重新获取最新环境(适应游戏内时间变化)
+                originalSettings.Ambient = nil 
+            end
+        end
+    end)
+
+    if not success then
+        warn("夜视功能出错: " .. tostring(err))
+    end
+end)
+
+-- 4. 这里的代码现在应该可以正常执行了
+print("UI加载完毕，夜视脚本已就绪")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+LeftGroupBox:AddButton('去除雾气 (No Fog)', function()
+    local Lighting = game:GetService("Lighting")
+    
+    -- 1. 移除基础雾气 (设置视野为无限)
+    Lighting.FogEnd = 100000 
+    Lighting.FogStart = 100000
+    
+    -- 2. 移除大气层效果 (很多新游戏用这个制造迷雾)
+    for _, v in pairs(Lighting:GetChildren()) do
+        if v:IsA("Atmosphere") then
+            v:Destroy()
         end
     end
     
-    -- 直接使用现有的Toggles.MyPseudoCodeToggle控制夜视功能
-    print("Toggle state changed to " .. tostring(state))
-    toggleNightVision(state)  -- 根据开关状态切换夜视功能
+    -- 3. (可选) 移除模糊效果
+    for _, v in pairs(Lighting:GetChildren()) do
+        if v:IsA("BlurEffect") then
+            v.Enabled = false
+        end
+    end
     
-    -- 连接清理函数到玩家离开事件
-    game.Players.LocalPlayer.OnClientRemoving:Connect(cleanupNightVision)
+    print("已执行去雾操作")
 end)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
