@@ -41,7 +41,7 @@ input.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 input.BorderSizePixel = 1
 input.BorderColor3 = Color3.fromRGB(100, 100, 100)
 input.Text = ""
-input.PlaceholderText = "输入卡密..."
+input.PlaceholderText = "输入卡密-进去会有一个QQ群千万不要加"
 input.TextColor3 = Color3.fromRGB(255, 255, 255)
 input.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
 input.TextSize = 16
@@ -104,6 +104,7 @@ local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
 local Options = Library.Options
 local Toggles = Library.Toggles
 Library:Notify("欢迎使用飞哥脚本中心，账号封禁后果自负", 4)
+Library:Notify("脚本那QQ群全是假的，不要加", 10)
 
 Library.ForceCheckbox = false -- Forces AddToggle to AddCheckbox
 Library.ShowToggleFrameInKeybinds = true -- Make toggle keybinds work inside the keybinds UI (aka adds a toggle to the UI). Good for mobile users (Default value = true)
@@ -149,7 +150,7 @@ local Tabs = {
 	Main = Window:AddTab("通用", "user"),
 }
 
-local LeftGroupBox = Tabs.Main:AddLeftGroupbox("Groupbox", "boxes")
+local LeftGroupBox = Tabs.Main:AddLeftGroupbox("脚本内任何QQ群不要加", "boxes")
 
 local Options = Library.Options
  
@@ -170,7 +171,7 @@ LeftGroupBox:AddSlider('SpeedSlider', {
     Text = '速度值',
     Default = 16,
     Min = 16,
-    Max = 500,
+    Max = 600,
     Rounding = 0,
     Suffix = '',
 })
@@ -211,43 +212,92 @@ local LeftGroupBox = Tabs.Main:AddLeftGroupbox("Groupbox", "boxes")
 
 
 
--- 创建滑块（与你给的一样）
+-- 服务定义（放在最前面，防止找不到）
+local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService") -- 引入 RunService 以便后续扩展
+local camera = workspace.CurrentCamera
+
+-------------------------------------------------------------------------
+-- FOV 模块 (修改部分)
+-------------------------------------------------------------------------
+
+-- 1. 创建 FOV 滑块
 local slider = LeftGroupBox:AddSlider("fov", {
-    Text = "fov",
-    Default = 20,
+    Text = "Field of View", -- 建议改个名区分
+    Default = 70,           -- 默认值稍微调大点比较符合通用习惯，可自行改回 20
     Min = 0,
     Max = 120,
     Rounding = 0,
-    Suffix = "%",
+    Suffix = "°",
 })
 
-local camera = workspace.CurrentCamera
-local updatingFromCode = false
+-- 2. [新增] 创建 FOV 锁定开关
+local FovLockToggle = LeftGroupBox:AddToggle("FovLock", {
+    Text = "锁定 FOV (防修改)",
+    Default = false,
+    Tooltip = "开启后，游戏系统无法更改你的视野",
+})
 
--- 当滑块被用户改动时，写回 Camera.FieldOfView
--- 注意：UI 的回调名字可能不同（OnChanged / OnValueChanged / Changed），按实际替换
+-- 变量：防止代码修改相机时触发死循环
+local updatingFromCode = false
+-- 变量：记录当前滑块的值，用于锁定
+local currentTargetFov = slider.Value or 70 
+
+-- 3. 当滑块被用户改动时 -> 修改相机
 slider:OnChanged(function(value)
+    -- 如果是脚本正在同步数据，则不执行
     if updatingFromCode then return end
+    
+    currentTargetFov = value -- 更新目标值
+    
     updatingFromCode = true
     camera.FieldOfView = value
     updatingFromCode = false
 end)
 
--- 当 Camera.FieldOfView 被其它代码修改时，更新滑块显示
--- Roblox 的属性改变信号是 GetPropertyChangedSignal
+-- 4. 当相机 FOV 发生变化时 (核心逻辑)
 camera:GetPropertyChangedSignal("FieldOfView"):Connect(function()
-    local v = camera.FieldOfView
-    -- 设置滑块的值的方法名可能是 SetValue / Set / SetValueNoCallback 等，按实际替换
-    updatingFromCode = true
-    slider:SetValue(v)
-    updatingFromCode = false
+    -- 如果是脚本自己改的，忽略
+    if updatingFromCode then return end
+
+    -- 检查锁定开关是否开启
+    if FovLockToggle.Value then
+        -- [锁定模式]
+        -- 游戏试图修改 FOV，我们强制把它改回来
+        if camera.FieldOfView ~= currentTargetFov then
+            updatingFromCode = true
+            camera.FieldOfView = currentTargetFov
+            updatingFromCode = false
+        end
+    else
+        -- [未锁定模式] (原来的逻辑)
+        -- 游戏修改了 FOV，同步更新滑块显示
+        updatingFromCode = true
+        slider:SetValue(camera.FieldOfView)
+        -- 同时更新目标值，防止下次开启锁定时跳变
+        currentTargetFov = camera.FieldOfView 
+        updatingFromCode = false
+    end
+end)
+
+-- [额外保护] 如果游戏每一帧都在强制修改FOV，上面的信号可能不够快
+-- 只有在开启锁定时，每一帧都强制覆盖 FOV
+RunService.RenderStepped:Connect(function()
+    if FovLockToggle.Value and not updatingFromCode then
+        if camera.FieldOfView ~= currentTargetFov then
+            updatingFromCode = true
+            camera.FieldOfView = currentTargetFov
+            updatingFromCode = false
+        end
+    end
 end)
 
 
--- 服务定义（放在最前面，防止找不到）
-local Lighting = game:GetService("Lighting")
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
+-------------------------------------------------------------------------
+-- 夜视模块 (保持原样)
+-------------------------------------------------------------------------
 
 -- 1. 在这里定义外部变量，确保存储的数据不会因为函数重置而丢失
 local originalSettings = {
@@ -333,12 +383,7 @@ MyToggle:OnChanged(function()
 end)
 
 -- 4. 这里的代码现在应该可以正常执行了
-print("UI加载完毕，夜视脚本已就绪")
-
-
-
-
-
+print("UI加载完毕，FOV锁定与夜视脚本已就绪")
 
 
 
@@ -554,6 +599,658 @@ end
 
 
 
+local MyButton = LeftGroupBox:AddButton({
+	Text = "甩飞(最新自研)",
+	Func = function()
+		-- 服务引用
+--[[
+    ⚡ TITAN OMNI-FLING ⚡
+    -------------------------------------------
+    [新增功能]: 👁️ 查看模式 | ♾️ 循环死斗模式
+    [核心保留]: 物理冷却 (防自杀) + 垂直震荡 (防粘连)
+    [操作]: 列表右侧增加了功能按钮
+]]
+
+local Configuration = {
+    Duration = 0.7,          -- 单次攻击时长
+    SpinPower = 9999999,      -- 旋转扭矩
+    SafetyBrakeTime = 0.45,   -- 回溯刹车时间 (安全核心)
+    ReturnHeight = 5,         -- 回溯高度
+}
+
+-- // 服务引用 //
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- // 状态管理 //
+local State = {
+    IsFlinging = false,
+    OriginalCFrame = nil,
+    LoopTarget = nil,    -- 循环目标
+    ViewTarget = nil,    -- 正在观看的目标
+    Connections = {}
+}
+
+-- // UI 系统 //
+local UI = {}
+function UI.Create()
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "Titan_Omni"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.Parent = game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui")
+
+    local Main = Instance.new("Frame")
+    Main.Name = "MainBoard"
+    Main.Size = UDim2.new(0, 300, 0, 450) -- 稍微加宽一点放下按钮
+    Main.Position = UDim2.new(0.05, 0, 0.35, 0)
+    Main.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    Main.BorderSizePixel = 0
+    Main.Active = true
+    Main.Draggable = true
+    Main.Parent = ScreenGui
+
+    Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 12)
+    local Stroke = Instance.new("UIStroke", Main)
+    Stroke.Color = Color3.fromRGB(0, 255, 255) -- 青色全能风
+    Stroke.Thickness = 1.5
+    Stroke.Transparency = 0.4
+
+    -- 头部
+    local Header = Instance.new("Frame", Main)
+    Header.Size = UDim2.new(1, 0, 0, 50)
+    Header.BackgroundTransparency = 1
+    
+    local Title = Instance.new("TextLabel", Header)
+    Title.Text = "TITAN OMNI"
+    Title.Size = UDim2.new(1, -20, 1, 0)
+    Title.Position = UDim2.new(0, 20, 0, 0)
+    Title.Font = Enum.Font.GothamBlack
+    Title.TextSize = 22
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.BackgroundTransparency = 1
+
+    local SubTitle = Instance.new("TextLabel", Header)
+    SubTitle.Text = "LOOP KILL & SPECTATE ADDED"
+    SubTitle.Size = UDim2.new(1, -20, 0, 20)
+    SubTitle.Position = UDim2.new(0, 22, 0, 32)
+    SubTitle.Font = Enum.Font.Gotham
+    SubTitle.TextSize = 9
+    SubTitle.TextColor3 = Color3.fromRGB(0, 255, 255)
+    SubTitle.TextXAlignment = Enum.TextXAlignment.Left
+    SubTitle.BackgroundTransparency = 1
+
+    -- 列表
+    local Scroll = Instance.new("ScrollingFrame", Main)
+    Scroll.Size = UDim2.new(0.94, 0, 0.72, 0)
+    Scroll.Position = UDim2.new(0.03, 0, 0.15, 0)
+    Scroll.BackgroundTransparency = 1
+    Scroll.ScrollBarThickness = 2
+    local ListLayout = Instance.new("UIListLayout", Scroll)
+    ListLayout.Padding = UDim.new(0, 6)
+    ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+    -- 状态栏
+    local StatusBar = Instance.new("Frame", Main)
+    StatusBar.Size = UDim2.new(1, 0, 0, 30)
+    StatusBar.Position = UDim2.new(0, 0, 1, -30)
+    StatusBar.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    Instance.new("UICorner", StatusBar).CornerRadius = UDim.new(0, 12)
+    
+    local StatusText = Instance.new("TextLabel", StatusBar)
+    StatusText.Size = UDim2.new(1, 0, 1, 0)
+    StatusText.BackgroundTransparency = 1
+    StatusText.Text = "SYSTEM READY"
+    StatusText.Font = Enum.Font.GothamBold
+    StatusText.TextSize = 10
+    StatusText.TextColor3 = Color3.fromRGB(150, 150, 150)
+
+    return {Frame = Main, Scroll = Scroll, Layout = ListLayout, Status = StatusText}
+end
+
+local Gui = UI.Create()
+
+-- // 物理与逻辑 //
+local Physics = {}
+
+function Physics.Cleanup()
+    for _, conn in pairs(State.Connections) do
+        if conn then conn:Disconnect() end
+    end
+    State.Connections = {}
+end
+
+-- 安全回溯 (支持循环逻辑)
+function Physics.SafetyReturn(MyRoot, MyHum, CurrentTarget)
+    if not State.OriginalCFrame then return end
+    
+    Gui.Status.Text = "⚠ BRAKING..."
+    Gui.Status.TextColor3 = Color3.fromRGB(255, 200, 0)
+    
+    -- 1. 恢复视角 (如果没在循环，或者循环间隙)
+    if State.ViewTarget then
+        Camera.CameraSubject = State.ViewTarget.Character and State.ViewTarget.Character:FindFirstChild("Humanoid")
+    else
+        Camera.CameraSubject = MyHum
+    end
+    
+    -- 2. 物理冻结
+    MyRoot.Anchored = true
+    
+    -- 3. 传送
+    MyRoot.CFrame = State.OriginalCFrame + Vector3.new(0, Configuration.ReturnHeight, 0)
+    
+    -- 4. 刹车
+    local BrakeTime = tick()
+    local BrakeLoop
+    BrakeLoop = RunService.Heartbeat:Connect(function()
+        if tick() - BrakeTime > Configuration.SafetyBrakeTime then
+            BrakeLoop:Disconnect()
+            
+            -- 刹车结束
+            if MyRoot then 
+                MyRoot.Anchored = false 
+                MyRoot.AssemblyLinearVelocity = Vector3.zero
+                MyRoot.AssemblyAngularVelocity = Vector3.zero
+            end
+            
+            if MyHum then
+                MyHum.PlatformStand = false
+                MyHum:ChangeState(Enum.HumanoidStateType.GettingUp)
+            end
+            
+            State.IsFlinging = false
+            
+            -- [循环判断核心]
+            if State.LoopTarget and State.LoopTarget == CurrentTarget then
+                Gui.Status.Text = "LOOPING: NEXT ATTACK..."
+                Gui.Status.TextColor3 = Color3.fromRGB(255, 50, 255)
+                task.delay(0.1, function()
+                    Physics.ExecuteAttack(State.LoopTarget) -- 递归调用攻击
+                end)
+            else
+                Gui.Status.Text = "SYSTEM READY"
+                Gui.Status.TextColor3 = Color3.fromRGB(150, 150, 150)
+            end
+
+        else
+            -- 持续强制归零
+            if MyRoot then
+                MyRoot.CFrame = State.OriginalCFrame + Vector3.new(0, Configuration.ReturnHeight, 0)
+                MyRoot.AssemblyLinearVelocity = Vector3.zero
+                MyRoot.AssemblyAngularVelocity = Vector3.zero
+                MyRoot.Velocity = Vector3.zero
+            end
+        end
+    end)
+end
+
+-- 攻击逻辑
+function Physics.ExecuteAttack(TargetPlayer)
+    -- 如果正在攻击且不是为了循环重置，则跳过
+    if State.IsFlinging then return end
+    if not TargetPlayer or not TargetPlayer.Character then 
+        -- 目标丢失，停止循环
+        if State.LoopTarget == TargetPlayer then
+            State.LoopTarget = nil
+            Gui.Status.Text = "TARGET LOST - LOOP STOPPED"
+        end
+        return 
+    end
+
+    local MyChar = LocalPlayer.Character
+    local MyRoot = MyChar and MyChar:FindFirstChild("HumanoidRootPart")
+    local MyHum = MyChar and MyChar:FindFirstChildOfClass("Humanoid")
+    local TargetRoot = TargetPlayer.Character:FindFirstChild("HumanoidRootPart")
+
+    if not MyRoot or not TargetRoot then return end
+
+    State.IsFlinging = true
+    -- 只有第一次攻击才记录原点，循环中不更新原点，防止位置偏移
+    if not State.OriginalCFrame then
+        State.OriginalCFrame = MyRoot.CFrame
+    end
+    
+    Gui.Status.Text = "FLINGING: " .. string.upper(TargetPlayer.DisplayName)
+    Gui.Status.TextColor3 = Color3.fromRGB(0, 255, 255)
+
+    -- 强制看目标
+    Camera.CameraSubject = TargetRoot
+
+    -- 无碰撞
+    local Noclip = RunService.Stepped:Connect(function()
+        if MyChar then
+            for _, v in pairs(MyChar:GetDescendants()) do
+                if v:IsA("BasePart") then v.CanCollide = false end
+            end
+        end
+    end)
+    table.insert(State.Connections, Noclip)
+
+    local StartTime = tick()
+    local Loop = RunService.Heartbeat:Connect(function()
+        if (tick() - StartTime > Configuration.Duration) or not TargetRoot.Parent then
+            Physics.Cleanup()
+            Physics.SafetyReturn(MyRoot, MyHum, TargetPlayer)
+            return
+        end
+
+        local TargetVel = TargetRoot.AssemblyLinearVelocity
+        local PredictPos = TargetRoot.Position + (TargetVel * 0.1)
+        
+        MyRoot.AssemblyAngularVelocity = Vector3.new(Configuration.SpinPower, Configuration.SpinPower, Configuration.SpinPower)
+        
+        -- 垂直震荡
+        local Spike = math.sin(tick() * 50) * 1.5
+        MyRoot.CFrame = CFrame.new(PredictPos) * CFrame.new(0, Spike, 0)
+        
+        MyRoot.AssemblyLinearVelocity = Vector3.zero 
+    end)
+    table.insert(State.Connections, Loop)
+end
+
+-- 查看功能
+function Physics.ToggleSpectate(TargetPlayer)
+    if State.ViewTarget == TargetPlayer then
+        -- 取消查看
+        State.ViewTarget = nil
+        Camera.CameraSubject = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+        Gui.Status.Text = "SPECTATE STOPPED"
+    else
+        -- 开始查看
+        State.ViewTarget = TargetPlayer
+        if TargetPlayer.Character and TargetPlayer.Character:FindFirstChild("Humanoid") then
+            Camera.CameraSubject = TargetPlayer.Character.Humanoid
+            Gui.Status.Text = "WATCHING: " .. string.upper(TargetPlayer.DisplayName)
+        end
+    end
+end
+
+-- // 列表刷新逻辑 (全能版 UI) //
+local function RefreshList()
+    for _, obj in pairs(Gui.Scroll:GetChildren()) do
+        if obj:IsA("Frame") then obj:Destroy() end
+    end
+
+    for _, Player in pairs(Players:GetPlayers()) do
+        if Player ~= LocalPlayer then
+            local ItemFrame = Instance.new("Frame")
+            ItemFrame.Parent = Gui.Scroll
+            ItemFrame.Size = UDim2.new(1, 0, 0, 42)
+            ItemFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+            Instance.new("UICorner", ItemFrame).CornerRadius = UDim.new(0, 8)
+
+            -- 头像
+            local Avatar = Instance.new("ImageLabel", ItemFrame)
+            Avatar.Size = UDim2.new(0, 32, 0, 32)
+            Avatar.Position = UDim2.new(0, 6, 0.5, -16)
+            Avatar.BackgroundTransparency = 1
+            Avatar.Image = Players:GetUserThumbnailAsync(Player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48)
+            Instance.new("UICorner", Avatar).CornerRadius = UDim.new(1, 0)
+
+            -- 名字
+            local NameLbl = Instance.new("TextLabel", ItemFrame)
+            NameLbl.Text = Player.DisplayName
+            NameLbl.Size = UDim2.new(0, 110, 0, 20)
+            NameLbl.Position = UDim2.new(0, 45, 0, 3)
+            NameLbl.Font = Enum.Font.GothamBold
+            NameLbl.TextColor3 = Color3.fromRGB(230, 230, 230)
+            NameLbl.TextSize = 12
+            NameLbl.TextXAlignment = Enum.TextXAlignment.Left
+            NameLbl.BackgroundTransparency = 1
+            NameLbl.ClipsDescendants = true
+
+            -- ID
+            local IdLbl = Instance.new("TextLabel", ItemFrame)
+            IdLbl.Text = "@" .. Player.Name
+            IdLbl.Size = UDim2.new(0, 110, 0, 15)
+            IdLbl.Position = UDim2.new(0, 45, 0, 23)
+            IdLbl.Font = Enum.Font.Gotham
+            IdLbl.TextColor3 = Color3.fromRGB(120, 120, 120)
+            IdLbl.TextSize = 10
+            IdLbl.TextXAlignment = Enum.TextXAlignment.Left
+            IdLbl.BackgroundTransparency = 1
+
+            -- [按钮组]
+            
+            -- 1. 查看按钮 (Eye)
+            local ViewBtn = Instance.new("TextButton", ItemFrame)
+            ViewBtn.Size = UDim2.new(0, 30, 0, 30)
+            ViewBtn.Position = UDim2.new(1, -105, 0.5, -15)
+            ViewBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+            ViewBtn.Text = "👁️"
+            ViewBtn.TextColor3 = Color3.new(1,1,1)
+            Instance.new("UICorner", ViewBtn).CornerRadius = UDim.new(0, 6)
+            
+            ViewBtn.MouseButton1Click:Connect(function()
+                Physics.ToggleSpectate(Player)
+            end)
+
+            -- 2. 循环按钮 (Loop)
+            local LoopBtn = Instance.new("TextButton", ItemFrame)
+            LoopBtn.Size = UDim2.new(0, 30, 0, 30)
+            LoopBtn.Position = UDim2.new(1, -70, 0.5, -15)
+            LoopBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+            LoopBtn.Text = "♾️"
+            LoopBtn.TextColor3 = Color3.new(1,1,1)
+            Instance.new("UICorner", LoopBtn).CornerRadius = UDim.new(0, 6)
+
+            LoopBtn.MouseButton1Click:Connect(function()
+                if State.LoopTarget == Player then
+                    State.LoopTarget = nil
+                    LoopBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+                    Gui.Status.Text = "LOOP STOPPED"
+                else
+                    -- 开始循环
+                    State.LoopTarget = Player
+                    -- 重置原点，确保以当前位置为家
+                    local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then State.OriginalCFrame = hrp.CFrame end
+                    
+                    LoopBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 255) -- 紫色表示循环
+                    Gui.Status.Text = "LOOP STARTED: " .. Player.DisplayName
+                    Physics.ExecuteAttack(Player)
+                end
+            end)
+
+            -- 3. 击杀按钮 (Kill)
+            local KillBtn = Instance.new("TextButton", ItemFrame)
+            KillBtn.Size = UDim2.new(0, 30, 0, 30)
+            KillBtn.Position = UDim2.new(1, -35, 0.5, -15)
+            KillBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+            KillBtn.Text = "☠️"
+            KillBtn.TextColor3 = Color3.new(1,1,1)
+            Instance.new("UICorner", KillBtn).CornerRadius = UDim.new(0, 6)
+
+            KillBtn.MouseButton1Click:Connect(function()
+                -- 点击单杀会停止循环
+                State.LoopTarget = nil 
+                
+                -- 更新原点
+                local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then State.OriginalCFrame = hrp.CFrame end
+
+                Physics.ExecuteAttack(Player)
+            end)
+        end
+    end
+    Gui.Scroll.CanvasSize = UDim2.new(0, 0, 0, Gui.Layout.AbsoluteContentSize.Y + 20)
+end
+
+-- 刷新按钮
+local RefreshBtn = Instance.new("TextButton", Gui.Frame)
+RefreshBtn.Size = UDim2.new(0.9, 0, 0, 35)
+RefreshBtn.Position = UDim2.new(0.05, 0, 0.88, 0)
+RefreshBtn.Text = "REFRESH TARGETS"
+RefreshBtn.Font = Enum.Font.GothamBold
+RefreshBtn.TextSize = 12
+RefreshBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+RefreshBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+Instance.new("UICorner", RefreshBtn).CornerRadius = UDim.new(0, 8)
+
+RefreshBtn.MouseButton1Click:Connect(RefreshList)
+Players.PlayerAdded:Connect(RefreshList)
+Players.PlayerRemoving:Connect(RefreshList)
+RefreshList()
+
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.RightControl then Gui.Frame.Visible = not Gui.Frame.Visible end
+end)
+
+	end,
+	DoubleClick = false,
+
+	Tooltip = "This is the main button",
+	DisabledTooltip = "I am disabled!",
+
+	Disabled = false, -- Will disable the button (true / false)
+	Visible = true, -- Will make the button invisible (true / false)
+	Risky = false, -- Makes the text red (the color can be changed using Library.Scheme.Red) (Default value = false)
+})
+
+
+
+
+
+local MyButton = LeftGroupBox:AddButton({
+	Text = "实时翻译(可能卡,应该不会,最新自研)",
+	Func = function()
+		-- 服务引用
+--[[
+    【死缠烂打·补漏大师版 (PC专用)】
+    核心升级：
+    1. 智能重试系统：请求被吞？没关系，脚本会无限尝试直到成功。
+    2. 暴力扫地模式：后台每隔3秒巡视全图，解决漏网之鱼。
+    3. 智能间隔：既保持实时响应，又不会被谷歌封IP。
+    4. 完美避坑：自动跳过你讨厌的 'i' 图标。
+]]
+
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
+
+-- === 配置 ===
+local CONFIG = {
+    TargetLang = "zh-CN", 
+    Font = Enum.Font.GothamBold,  -- 修复乱码方块字
+    Interval = 0.05,              -- 请求间隔 (秒)，越小越快，PC可以设小点
+    RetryDelay = 2,               -- 如果失败，多少秒后重试
+}
+
+-- === 工具：检测 ===
+local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+if not requestFunc then return end
+
+-- 缓存：[原文] = 译文 (翻译成功的)
+local SuccessCache = {}
+-- 失败队列：那些漏翻的，都在这里面
+local PendingSet = {} 
+
+--------------------------------------------------------------------------------
+-- 1. 过滤逻辑 (听你的，i 不要翻，其他全翻)
+--------------------------------------------------------------------------------
+local function ShouldTranslate(text, obj)
+    if not text then return false end
+    -- 去空格
+    local clean = text:match("^%s*(.-)%s*$")
+    if not clean then return false end
+
+    -- 【关键】：如果长度小于2 (单个字符 i, x, ?, A, 1)，一律不碰
+    if #clean < 2 then return false end
+    
+    -- 忽略纯数字/符号
+    if clean:match("^[%d%p%s]+$") then return false end
+    
+    -- 忽略已经含中文的
+    for i=1, #clean do if string.byte(clean,i)>227 then return false end end
+    
+    -- 忽略输入框
+    if obj and obj:IsA("TextBox") then return false end
+    -- 忽略系统菜单
+    if obj and (obj:IsDescendantOf(CoreGui) or obj:FindFirstAncestor("Chat")) then return false end
+    
+    return true
+end
+
+--------------------------------------------------------------------------------
+-- 2. 网络层 (带重试机制)
+--------------------------------------------------------------------------------
+local function URL_Encode(str)
+    str = string.gsub(str, "\n", "\r\n")
+    str = string.gsub(str, "([^%w %-%_%.%~])", function(c) return string.format("%%%02X", string.byte(c)) end)
+    str = string.gsub(str, " ", "+")
+    return str
+end
+
+local function TranslateTask(text, callback)
+    task.spawn(function()
+        local url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl="..CONFIG.TargetLang.."&dt=t&q="..URL_Encode(text)
+        
+        -- 发送请求
+        local success, resp = pcall(function() return requestFunc({Url=url, Method="GET"}) end)
+        
+        if success and resp.StatusCode == 200 then
+            local data = HttpService:JSONDecode(resp.Body)
+            local final = ""
+            if data and data[1] then
+                for _,line in ipairs(data[1]) do final = final .. (line[1] or "") end
+            end
+            if final ~= "" then
+                callback(true, final) -- 成功
+                return
+            end
+        end
+        -- 如果代码走到这，说明失败了 (网络问题/API限流)
+        callback(false, nil)
+    end)
+end
+
+--------------------------------------------------------------------------------
+-- 3. 调度中心
+--------------------------------------------------------------------------------
+local function ApplyTranslation(obj, text)
+    if SuccessCache[text] and obj.Parent then
+        obj.Text = SuccessCache[text]
+        obj.Font = CONFIG.Font
+        return true
+    end
+    return false
+end
+
+-- 只要发现有没翻译的，就扔进去
+local function AddToWork(obj)
+    local text = obj.Text
+    if not ShouldTranslate(text, obj) then return end
+    if SuccessCache[text] then ApplyTranslation(obj, text) return end -- 命中缓存直接秒杀
+    
+    -- 标记正在处理 (防止重复入队)
+    if PendingSet[text] then return end
+    PendingSet[text] = true
+    
+    -- 开启线程处理它
+    task.spawn(function()
+        local attempt = 0
+        local solved = false
+        
+        while not solved and attempt < 5 do -- 最多死磕 5 次
+            task.wait(CONFIG.Interval + (attempt * 0.5)) -- 每次重试稍微慢一点，防止封号
+            
+            TranslateTask(text, function(ok, res)
+                if ok and res then
+                    SuccessCache[text] = res
+                    PendingSet[text] = nil
+                    
+                    -- 回头找找这个对象还在不在，在了就改
+                    if obj and obj.Parent then
+                         obj.Text = res
+                         obj.Font = CONFIG.Font
+                    end
+                    solved = true
+                else
+                    attempt = attempt + 1 -- 失败，次数+1，进入下一轮循环
+                end
+            end)
+            
+            -- 等待回调完成再决定由于是并行网络，这里做一个粗略等待
+            -- (实际上面的 callback 会异步处理，这里主要保底防止死循环太快)
+            task.wait(1)
+        end
+        
+        -- 如果5次都失败了，清空标记，等“巡逻队”下次再把它抓进来重新试
+        if not solved then PendingSet[text] = nil end
+    end)
+end
+
+-- === 4. 监听器 ===
+local function Hook(obj)
+    if not obj then return end
+    if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+        AddToWork(obj) -- 见面先干一次
+        
+        -- 之后如果它变了，再干一次
+        obj:GetPropertyChangedSignal("Text"):Connect(function()
+            -- 排除是脚本自己改的情况
+            if not SuccessCache[obj.Text] then
+                AddToWork(obj)
+            end
+        end)
+    end
+end
+
+-- 遍历工具
+local function DeepScan(parent)
+    for _,v in pairs(parent:GetDescendants()) do Hook(v) end
+    parent.DescendantAdded:Connect(function(v)
+        task.wait(0.2) -- 缓冲
+        Hook(v)
+        -- 如果是容器，深扫子集
+        for _,c in pairs(v:GetDescendants()) do Hook(c) end
+    end)
+end
+
+--------------------------------------------------------------------------------
+-- ★ 5. 补漏扫地僧 (死缠烂打逻辑) ★
+--------------------------------------------------------------------------------
+-- 这是专门解决你说的“有些翻译不了”的问题
+-- 很多时候事件漏了，这个每隔几秒的强力扫描会把它抓出来
+task.spawn(function()
+    print(">>> 补漏大师正在后台巡视...")
+    local PlayerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+    
+    while task.wait(3) do -- 每3秒扫一遍屏幕上所有的字
+        -- 扫 UI
+        for _, obj in pairs(PlayerGui:GetDescendants()) do
+             if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Visible then
+                 -- 如果它现在显示的是英文，且我们没在处理它
+                 local t = obj.Text
+                 if ShouldTranslate(t, obj) and not SuccessCache[t] and not PendingSet[t] then
+                     AddToWork(obj) -- 强制抓进去重翻
+                 elseif SuccessCache[t] and obj.Text ~= SuccessCache[t] then
+                     obj.Text = SuccessCache[t] -- 强制修正
+                     obj.Font = CONFIG.Font
+                 end
+             end
+        end
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- 6. 启动
+--------------------------------------------------------------------------------
+print(">>> 死缠烂打翻译机已启动 - i图标不翻，其余全翻，带自动重试")
+
+-- 扫界面
+DeepScan(Players.LocalPlayer:WaitForChild("PlayerGui"))
+
+-- 扫 Workspace (商店牌子)
+for _,v in pairs(Workspace:GetDescendants()) do
+    if v:IsA("BillboardGui") or v:IsA("SurfaceGui") then
+        DeepScan(v)
+    end
+end
+Workspace.DescendantAdded:Connect(function(v)
+    if v:IsA("BillboardGui") or v:IsA("SurfaceGui") then
+        DeepScan(v)
+    end
+end)
+
+	end,
+	DoubleClick = false,
+
+	Tooltip = "This is the main button",
+	DisabledTooltip = "I am disabled!",
+
+	Disabled = false, -- Will disable the button (true / false)
+	Visible = true, -- Will make the button invisible (true / false)
+	Risky = false, -- Makes the text red (the color can be changed using Library.Scheme.Red) (Default value = false)
+})
 
 
 
@@ -565,6 +1262,124 @@ end
 
 
 
+
+
+
+local MyButton = LeftGroupBox:AddButton({
+	Text = "speed v2",
+	Func = function()
+		-- Roblox TP Speed V26 (只加了跳跃)
+-- 基于你最喜欢的 V23 版本修改
+-- 功能完全不变，只是解开了 Y 轴锁，现在可以一边瞬移一边按空格跳了
+
+local Services = {
+    Players = game:GetService("Players"),
+    RunService = game:GetService("RunService"),
+    UserInputService = game:GetService("UserInputService"),
+    CoreGui = game:GetService("CoreGui")
+}
+
+local LocalPlayer = Services.Players.LocalPlayer
+local guiName = "TPJumpGUI"
+
+-- 1. 还原 V23 的界面
+if Services.CoreGui:FindFirstChild(guiName) then Services.CoreGui[guiName]:Destroy() end
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = guiName
+pcall(function() ScreenGui.Parent = Services.CoreGui end)
+if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 200, 0, 110)
+Frame.Position = UDim2.new(0.1, 0, 0.5, 0)
+Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+Frame.Active = true; Frame.Draggable = true
+Frame.Parent = ScreenGui
+Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 8)
+
+-- 标题
+local Title = Instance.new("TextLabel")
+Title.Text = "⚡ TP瞬移 (解锁跳跃)"
+Title.Size = UDim2.new(1,0,0,30)
+Title.TextColor3 = Color3.fromRGB(255, 220, 0)
+Title.BackgroundTransparency=1
+Title.Font = Enum.Font.GothamBlack
+Title.TextSize=16; Title.Parent=Frame
+
+-- 速度框
+local SpeedInput = Instance.new("TextBox")
+SpeedInput.Size = UDim2.new(0.8, 0, 0, 30)
+SpeedInput.Position = UDim2.new(0.1, 0, 0.35, 0)
+SpeedInput.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+SpeedInput.Text = "2" -- 默认还是2，你自己改
+SpeedInput.TextColor3 = Color3.new(1,1,1)
+SpeedInput.Font = Enum.Font.Gotham; SpeedInput.TextSize=16
+SpeedInput.Parent = Frame
+Instance.new("UICorner", SpeedInput).CornerRadius = UDim.new(0, 6)
+
+-- 提示
+local Tip = Instance.new("TextLabel")
+Tip.Text = "按 [X] 键开启/停止"
+Tip.Size = UDim2.new(1,0,0,30)
+Tip.Position = UDim2.new(0,0,0.7,0)
+Tip.TextColor3 = Color3.fromRGB(150,150,150)
+Tip.BackgroundTransparency=1
+Tip.Font=Enum.Font.Gotham; Tip.TextSize=14; Tip.Parent=Frame
+
+-- 2. 逻辑 (和你喜欢的那版一模一样，只改了一行代码)
+local Enabled = false
+local SpeedMultiplier = 2 
+
+SpeedInput.FocusLost:Connect(function()
+    local num = tonumber(SpeedInput.Text)
+    if num then SpeedMultiplier = num end
+end)
+
+Services.UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.X then
+        Enabled = not Enabled
+        if Enabled then
+            Tip.Text = "状态: 🔥 已开启"
+            Tip.TextColor3 = Color3.fromRGB(0, 255, 0)
+        else
+            Tip.Text = "状态: ⛔ 已停止"
+            Tip.TextColor3 = Color3.fromRGB(150, 150, 150)
+        end
+    end
+end)
+
+-- 核心心跳 (修改版)
+Services.RunService.Heartbeat:Connect(function(deltaTime)
+    if not Enabled then return end
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChild("Humanoid")
+    local root = char:FindFirstChild("HumanoidRootPart")
+    
+    if hum and root and hum.MoveDirection.Magnitude > 0 then
+        -- 1. 依然是暴力TP，无视阻挡，速度快
+        root.CFrame = root.CFrame + (hum.MoveDirection * (deltaTime * 50 * SpeedMultiplier))
+        
+        -- 2. 【这里改了】: 
+        -- 之前是 Vector3.new(0, 0, 0) 所以跳不起来
+        -- 现在保留了 root.AssemblyLinearVelocity.Y (原本的垂直速度)
+        -- 所以X/Z轴急停防滑，但是Y轴可以正常起飞！
+        root.AssemblyLinearVelocity = Vector3.new(0, root.AssemblyLinearVelocity.Y, 0)
+    end
+end)
+
+	end,
+	DoubleClick = false,
+
+	Tooltip = "This is the main button",
+	DisabledTooltip = "I am disabled!",
+
+	Disabled = false, -- Will disable the button (true / false)
+	Visible = true, -- Will make the button invisible (true / false)
+	Risky = false, -- Makes the text red (the color can be changed using Library.Scheme.Red) (Default value = false)
+})
 
 
 
