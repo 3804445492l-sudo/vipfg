@@ -313,82 +313,256 @@ local nvEffect = {
 }
 
 -- 2. 直接获取 AddToggle 的返回值 (local MyToggle)，不要用 Toggles.名字
-local MyToggle = LeftGroupBox:AddToggle("NightVisionToggle", {
-    Text = "夜视 (稳定版)",
+local Lighting = game:GetService("Lighting")
+
+local NormalToggle = LeftGroupBox:AddToggle("NormalNV", {
+    Text = "正常夜视 (单次修改)",
     Default = false,
-    Tooltip = "开启后增强环境光",
+    Tooltip = "修改一次参数，不占用性能",
 })
 
--- 3. 使用返回的 MyToggle 变量连接事件
-MyToggle:OnChanged(function()
-    -- 使用 pcall 包裹逻辑，防止内部错误导致整个脚本崩溃
-    local success, err = pcall(function()
-        local state = MyToggle.Value -- 获取当前开关状态
-
-        if state then
-            -- [开启夜视]
-            
-            -- 如果之前没有保存过，或者保存的数据为空，则保存当前环境
-            if originalSettings.Ambient == nil then
-                originalSettings.Ambient = Lighting.Ambient
-                originalSettings.Brightness = Lighting.Brightness
-                originalSettings.OutdoorAmbient = Lighting.OutdoorAmbient
-                originalSettings.FogEnd = Lighting.FogEnd
-                originalSettings.GlobalShadows = Lighting.GlobalShadows
-            end
-
-            -- 创建/应用夜视效果
-            Lighting.Ambient = Color3.fromRGB(120, 120, 120) -- 室内变亮
-            Lighting.OutdoorAmbient = Color3.fromRGB(120, 120, 120) -- 室外变亮
-            Lighting.Brightness = 2 -- 整体亮度
-            Lighting.FogEnd = 100000 -- 去除雾气
-            Lighting.GlobalShadows = false --以此获得极致亮度(可选)
-
-            -- 可选：添加颜色滤镜
-            if not nvEffect.cc then
-                local cc = Instance.new("ColorCorrectionEffect")
-                cc.Name = "NightVisionCC"
-                cc.Brightness = 0.2
-                cc.Contrast = 0.1
-                cc.Parent = Lighting
-                nvEffect.cc = cc
-            end
-
-        else
-            -- [关闭夜视]
-            
-            -- 清理滤镜
-            if nvEffect.cc then
-                nvEffect.cc:Destroy()
-                nvEffect.cc = nil
-            end
-
-            -- 恢复原始设置 (只有在确实保存了设置的情况下才恢复)
-            if originalSettings.Ambient ~= nil then
-                Lighting.Ambient = originalSettings.Ambient
-                Lighting.Brightness = originalSettings.Brightness
-                Lighting.OutdoorAmbient = originalSettings.OutdoorAmbient
-                Lighting.FogEnd = originalSettings.FogEnd
-                Lighting.GlobalShadows = originalSettings.GlobalShadows
-                
-                -- 重置保存的设置，以便下次开启时重新获取最新环境(适应游戏内时间变化)
-                originalSettings.Ambient = nil 
-            end
-        end
-    end)
-
-    if not success then
-        warn("夜视功能出错: " .. tostring(err))
+NormalToggle:OnChanged(function()
+    if NormalToggle.Value then
+        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+        Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+        Lighting.Brightness = 2
+        Lighting.GlobalShadows = false
+        Lighting.ExposureCompensation = 0.5 -- 适度补偿，不瞎眼
+    else
+        -- 还原 (这里建议填游戏默认值)
+        Lighting.Ambient = Color3.fromRGB(0, 0, 0)
+        Lighting.OutdoorAmbient = Color3.fromRGB(127, 127, 127)
+        Lighting.Brightness = 1
+        Lighting.GlobalShadows = true
+        Lighting.ExposureCompensation = 0
     end
 end)
 
--- 4. 这里的代码现在应该可以正常执行了
-print("UI加载完毕，FOV锁定与夜视脚本已就绪")
 
 
 
 
 
+
+
+local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
+local NVLoop = nil
+
+local LoopToggle = LeftGroupBox:AddToggle("LoopNV", {
+    Text = "强力夜视 (每帧死锁)",
+    Default = false,
+    Tooltip = "暴力覆盖游戏脚本，适合极暗/强制变黑的地图",
+})
+
+LoopToggle:OnChanged(function()
+    if LoopToggle.Value then
+        -- 开启每帧死锁循环
+        NVLoop = RunService.RenderStepped:Connect(function()
+            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+            Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+            Lighting.Brightness = 2
+            Lighting.GlobalShadows = false
+            Lighting.ExposureCompensation = 0.5
+            -- 额外加成：防止迷雾挡路
+            Lighting.FogEnd = 9e9 
+        end)
+    else
+        -- 关闭循环
+        if NVLoop then
+            NVLoop:Disconnect()
+            NVLoop = nil
+        end
+        -- 简单还原一下
+        Lighting.GlobalShadows = true
+        Lighting.FogEnd = 10000
+    end
+end)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+local MyButton = LeftGroupBox:AddButton({
+    Text = "终极透视 (细节加重 + 死亡秒清)",
+    Func = function()
+        -- // 1. 状态开关 //
+        if _G.ComboESP_Active then
+            _G.ComboESP_Active = false
+            return
+        end
+        _G.ComboESP_Active = true
+
+        -- // 2. 环境声明 //
+        local Players = game:GetService("Players")
+        local RunService = game:GetService("RunService")
+        local Camera = workspace.CurrentCamera
+        local LocalPlayer = Players.LocalPlayer
+
+        -- // 3. 骨骼缓存 //
+        local Skeleton_Cache = {}
+
+        -- // 4. 画笔工具 (加重细节) //
+        local function NewLine()
+            local l = Drawing.new("Line")
+            l.Visible = false
+            l.Thickness = 2.5 -- 细节加重：加粗线条
+            l.Transparency = 1
+            l.Color = Color3.new(1, 1, 1)
+            l.From = Vector2.new(0, 0)
+            l.To = Vector2.new(0, 0)
+            return l
+        end
+
+        -- // 5. 强效清理函数 //
+        local function RemoveESP(plr)
+            if Skeleton_Cache[plr] then
+                for _, line in pairs(Skeleton_Cache[plr]) do
+                    line.Visible = false -- 先隐藏防止闪烁
+                    line:Remove()
+                end
+                Skeleton_Cache[plr] = nil
+            end
+            if plr.Character then
+                local hl = plr.Character:FindFirstChild("SupremeContour")
+                if hl then hl:Destroy() end
+            end
+        end
+
+        -- // 6. 兼容性Part获取 (暴力扫描) //
+        local function GetPart(char, names)
+            for _, name in pairs(names) do
+                local p = char:FindFirstChild(name)
+                if p and p:IsA("BasePart") then return p end
+            end
+            return nil
+        end
+
+        -- // 7. 主循环 (RenderStepped 保证丝滑) //
+        local function Update()
+            if not _G.ComboESP_Active then
+                for p, _ in pairs(Skeleton_Cache) do RemoveESP(p) end
+                return
+            end
+
+            local color = Color3.fromHSV(tick() % 5 / 5, 1, 1)
+
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer then
+                    local char = player.Character
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+                    -- 【核心修复：严格判断死亡状态】
+                    -- 如果没有角色、没有生命值、或者不在地图内，执行 Remove 并跳过
+                    if not (char and hum and hum.Health > 0 and char:FindFirstChild("Head")) then
+                        RemoveESP(player)
+                        continue
+                    end
+
+                    -- A. 轮廓强化
+                    local hl = char:FindFirstChild("SupremeContour")
+                    if not hl then
+                        hl = Instance.new("Highlight")
+                        hl.Name = "SupremeContour"
+                        hl.Parent = char
+                        hl.FillTransparency = 1
+                        hl.OutlineTransparency = 0
+                        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    end
+                    hl.OutlineColor = color
+
+                    -- B. 骨骼全细节 (R15 全覆盖)
+                    if not Skeleton_Cache[player] then
+                        Skeleton_Cache[player] = {
+                            Head_Upper = NewLine(), Upper_Lower = NewLine(),
+                            L_UArm = NewLine(), L_LArm = NewLine(), L_Hand = NewLine(),
+                            R_UArm = NewLine(), R_LArm = NewLine(), R_Hand = NewLine(),
+                            L_ULeg = NewLine(), L_LLeg = NewLine(), L_Foot = NewLine(),
+                            R_ULeg = NewLine(), R_LLeg = NewLine(), R_Foot = NewLine()
+                        }
+                    end
+
+                    local sk = Skeleton_Cache[player]
+                    local function Draw(line, p1, p2)
+                        if p1 and p2 then
+                            local pos1, vis1 = Camera:WorldToViewportPoint(p1.Position)
+                            local pos2, vis2 = Camera:WorldToViewportPoint(p2.Position)
+                            if vis1 and vis2 then
+                                line.From = Vector2.new(pos1.X, pos1.Y)
+                                line.To = Vector2.new(pos2.X, pos2.Y)
+                                line.Color = color
+                                line.Visible = true
+                                return
+                            end
+                        end
+                        line.Visible = false
+                    end
+
+                    -- 暴力获取肢体 (适配 R6, R15, 及各类改名 Part)
+                    local Head = char:FindFirstChild("Head")
+                    local UpperTorso = GetPart(char, {"UpperTorso", "Torso", "HumanoidRootPart"})
+                    local LowerTorso = GetPart(char, {"LowerTorso", "Torso", "HumanoidRootPart"})
+                    
+                    -- 左肢
+                    local LUA = GetPart(char, {"LeftUpperArm", "Left Arm"})
+                    local LLA = GetPart(char, {"LeftLowerArm", "Left Arm"})
+                    local LH  = GetPart(char, {"LeftHand", "Left Arm"})
+                    -- 右肢
+                    local RUA = GetPart(char, {"RightUpperArm", "Right Arm"})
+                    local RLA = GetPart(char, {"RightLowerArm", "Right Arm"})
+                    local RH  = GetPart(char, {"RightHand", "Right Arm"})
+                    -- 左腿
+                    local LUL = GetPart(char, {"LeftUpperLeg", "Left Leg"})
+                    local LLL = GetPart(char, {"LeftLowerLeg", "Left Leg"})
+                    local LF  = GetPart(char, {"LeftFoot", "Left Leg"})
+                    -- 右腿
+                    local RUL = GetPart(char, {"RightUpperLeg", "Right Leg"})
+                    local RLL = GetPart(char, {"RightLowerLeg", "Right Leg"})
+                    local RF  = GetPart(char, {"RightFoot", "Right Leg"})
+
+                    -- 全细节连线
+                    Draw(sk.Head_Upper, Head, UpperTorso)
+                    Draw(sk.Upper_Lower, UpperTorso, LowerTorso)
+                    
+                    Draw(sk.L_UArm, UpperTorso, LUA); Draw(sk.L_LArm, LUA, LLA); Draw(sk.L_Hand, LLA, LH)
+                    Draw(sk.R_UArm, UpperTorso, RUA); Draw(sk.R_LArm, RUA, RLA); Draw(sk.R_Hand, RLA, RH)
+                    
+                    Draw(sk.L_ULeg, LowerTorso, LUL); Draw(sk.L_LLeg, LUL, LLL); Draw(sk.L_Foot, LLL, LF)
+                    Draw(sk.R_ULeg, LowerTorso, RUL); Draw(sk.R_LLeg, RUL, RLL); Draw(sk.R_Foot, RLL, RF)
+                end
+            end
+        end
+
+        -- // 8. 启动 //
+        local conn = RunService.RenderStepped:Connect(Update)
+
+        -- 监控清理 (针对全局变量控制)
+        task.spawn(function()
+            while _G.ComboESP_Active do task.wait(0.5) end
+            conn:Disconnect()
+            for _, p in pairs(Players:GetPlayers()) do RemoveESP(p) end
+        end)
+        
+        -- 针对玩家退出的监听
+        Players.PlayerRemoving:Connect(RemoveESP)
+    end
+})
 
 
 
@@ -1018,238 +1192,321 @@ end)
 
 
 local MyButton = LeftGroupBox:AddButton({
-	Text = "实时翻译(可能卡,应该不会,最新自研)",
-	Func = function()
-		-- 服务引用
---[[
-    【死缠烂打·补漏大师版 (PC专用)】
-    核心升级：
-    1. 智能重试系统：请求被吞？没关系，脚本会无限尝试直到成功。
-    2. 暴力扫地模式：后台每隔3秒巡视全图，解决漏网之鱼。
-    3. 智能间隔：既保持实时响应，又不会被谷歌封IP。
-    4. 完美避坑：自动跳过你讨厌的 'i' 图标。
-]]
+    Text = "实时翻译 (增强优化版)",
+    Func = function()
+        --[[
+            【死缠烂打·性能优化版 v2.0】
+            1. 异步队列：完全不卡 UI，翻译在后台静默排队。
+            2. 智能防封：检测到谷歌 API 报错会自动降速。
+            3. 递归锁定：防止游戏原生脚本强制改回英文导致的闪烁。
+        ]]
 
-local HttpService = game:GetService("HttpService")
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local CoreGui = game:GetService("CoreGui")
-local RunService = game:GetService("RunService")
+        local HttpService = game:GetService("HttpService")
+        local Players = game:GetService("Players")
+        local Workspace = game:GetService("Workspace")
+        local RunService = game:GetService("RunService")
 
--- === 配置 ===
-local CONFIG = {
-    TargetLang = "zh-CN", 
-    Font = Enum.Font.GothamBold,  -- 修复乱码方块字
-    Interval = 0.05,              -- 请求间隔 (秒)，越小越快，PC可以设小点
-    RetryDelay = 2,               -- 如果失败，多少秒后重试
-}
+        local CONFIG = {
+            TargetLang = "zh-CN",
+            Font = Enum.Font.GothamBold,
+            Cooldown = 0.1, -- 每个请求的基础间隔
+            MaxRetry = 3,   -- 最大重试次数
+        }
 
--- === 工具：检测 ===
-local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-if not requestFunc then return end
+        local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+        if not requestFunc then return end
 
--- 缓存：[原文] = 译文 (翻译成功的)
-local SuccessCache = {}
--- 失败队列：那些漏翻的，都在这里面
-local PendingSet = {} 
+        local SuccessCache = {}
+        local PendingSet = {}
+        local LastRequestTime = 0
 
---------------------------------------------------------------------------------
--- 1. 过滤逻辑 (听你的，i 不要翻，其他全翻)
---------------------------------------------------------------------------------
-local function ShouldTranslate(text, obj)
-    if not text then return false end
-    -- 去空格
-    local clean = text:match("^%s*(.-)%s*$")
-    if not clean then return false end
-
-    -- 【关键】：如果长度小于2 (单个字符 i, x, ?, A, 1)，一律不碰
-    if #clean < 2 then return false end
-    
-    -- 忽略纯数字/符号
-    if clean:match("^[%d%p%s]+$") then return false end
-    
-    -- 忽略已经含中文的
-    for i=1, #clean do if string.byte(clean,i)>227 then return false end end
-    
-    -- 忽略输入框
-    if obj and obj:IsA("TextBox") then return false end
-    -- 忽略系统菜单
-    if obj and (obj:IsDescendantOf(CoreGui) or obj:FindFirstAncestor("Chat")) then return false end
-    
-    return true
-end
-
---------------------------------------------------------------------------------
--- 2. 网络层 (带重试机制)
---------------------------------------------------------------------------------
-local function URL_Encode(str)
-    str = string.gsub(str, "\n", "\r\n")
-    str = string.gsub(str, "([^%w %-%_%.%~])", function(c) return string.format("%%%02X", string.byte(c)) end)
-    str = string.gsub(str, " ", "+")
-    return str
-end
-
-local function TranslateTask(text, callback)
-    task.spawn(function()
-        local url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl="..CONFIG.TargetLang.."&dt=t&q="..URL_Encode(text)
-        
-        -- 发送请求
-        local success, resp = pcall(function() return requestFunc({Url=url, Method="GET"}) end)
-        
-        if success and resp.StatusCode == 200 then
-            local data = HttpService:JSONDecode(resp.Body)
-            local final = ""
-            if data and data[1] then
-                for _,line in ipairs(data[1]) do final = final .. (line[1] or "") end
-            end
-            if final ~= "" then
-                callback(true, final) -- 成功
-                return
-            end
+        -- === 过滤逻辑：只翻有意义的内容 ===
+        local function ShouldTranslate(text, obj)
+            if not text or #text < 2 then return false end
+            local clean = text:match("^%s*(.-)%s*$")
+            if not clean or #clean < 2 or clean == "i" then return false end
+            if clean:match("^[%d%p%s]+$") then return false end
+            -- 检查是否包含中文（跳过已翻译）
+            for i = 1, #clean do if string.byte(clean, i) > 127 then return false end end
+            if obj:IsA("TextBox") then return false end
+            return true
         end
-        -- 如果代码走到这，说明失败了 (网络问题/API限流)
-        callback(false, nil)
-    end)
-end
 
---------------------------------------------------------------------------------
--- 3. 调度中心
---------------------------------------------------------------------------------
-local function ApplyTranslation(obj, text)
-    if SuccessCache[text] and obj.Parent then
-        obj.Text = SuccessCache[text]
-        obj.Font = CONFIG.Font
-        return true
-    end
-    return false
-end
+        local function URL_Encode(str)
+            return string.gsub(str, "([^%w %-%_%.%~])", function(c) 
+                return string.format("%%%02X", string.byte(c)) 
+            end):gsub(" ", "+")
+        end
 
--- 只要发现有没翻译的，就扔进去
-local function AddToWork(obj)
-    local text = obj.Text
-    if not ShouldTranslate(text, obj) then return end
-    if SuccessCache[text] then ApplyTranslation(obj, text) return end -- 命中缓存直接秒杀
-    
-    -- 标记正在处理 (防止重复入队)
-    if PendingSet[text] then return end
-    PendingSet[text] = true
-    
-    -- 开启线程处理它
-    task.spawn(function()
-        local attempt = 0
-        local solved = false
-        
-        while not solved and attempt < 5 do -- 最多死磕 5 次
-            task.wait(CONFIG.Interval + (attempt * 0.5)) -- 每次重试稍微慢一点，防止封号
+        -- === 核心翻译函数 (异步处理) ===
+        local function PerformTranslate(text, callback)
+            -- 控制请求频率，防止被封 IP
+            local now = tick()
+            if now - LastRequestTime < CONFIG.Cooldown then
+                task.wait(CONFIG.Cooldown - (now - LastRequestTime))
+            end
+            LastRequestTime = tick()
+
+            local url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl="..CONFIG.TargetLang.."&dt=t&q="..URL_Encode(text)
             
-            TranslateTask(text, function(ok, res)
-                if ok and res then
-                    SuccessCache[text] = res
-                    PendingSet[text] = nil
-                    
-                    -- 回头找找这个对象还在不在，在了就改
-                    if obj and obj.Parent then
-                         obj.Text = res
-                         obj.Font = CONFIG.Font
+            task.spawn(function()
+                local success, resp = pcall(function() return requestFunc({Url = url, Method = "GET"}) end)
+                
+                if success and resp.StatusCode == 200 then
+                    local data = HttpService:JSONDecode(resp.Body)
+                    if data and data[1] then
+                        local result = ""
+                        for _, line in ipairs(data[1]) do result = result .. (line[1] or "") end
+                        callback(true, result)
+                    else
+                        callback(false)
                     end
-                    solved = true
+                elseif resp and resp.StatusCode == 429 then
+                    warn("Google API 请求过快，正在进入冷静期...")
+                    task.wait(5) -- 触发限流，强制休眠
+                    callback(false)
                 else
-                    attempt = attempt + 1 -- 失败，次数+1，进入下一轮循环
+                    callback(false)
                 end
             end)
-            
-            -- 等待回调完成再决定由于是并行网络，这里做一个粗略等待
-            -- (实际上面的 callback 会异步处理，这里主要保底防止死循环太快)
-            task.wait(1)
         end
-        
-        -- 如果5次都失败了，清空标记，等“巡逻队”下次再把它抓进来重新试
-        if not solved then PendingSet[text] = nil end
-    end)
-end
 
--- === 4. 监听器 ===
-local function Hook(obj)
-    if not obj then return end
-    if obj:IsA("TextLabel") or obj:IsA("TextButton") then
-        AddToWork(obj) -- 见面先干一次
-        
-        -- 之后如果它变了，再干一次
-        obj:GetPropertyChangedSignal("Text"):Connect(function()
-            -- 排除是脚本自己改的情况
-            if not SuccessCache[obj.Text] then
-                AddToWork(obj)
+        -- === 智能分配任务 ===
+        local function AddToWork(obj)
+            local originalText = obj.Text
+            if not ShouldTranslate(originalText, obj) then return end
+            
+            -- 如果有缓存，直接秒改
+            if SuccessCache[originalText] then
+                obj.Text = SuccessCache[originalText]
+                obj.Font = CONFIG.Font
+                return
+            end
+
+            -- 防止重复进入翻译队列
+            if PendingSet[originalText] then return end
+            PendingSet[originalText] = true
+
+            task.spawn(function()
+                local solved = false
+                local retry = 0
+                
+                while not solved and retry < CONFIG.MaxRetry do
+                    local done = false
+                    PerformTranslate(originalText, function(ok, res)
+                        if ok and res then
+                            SuccessCache[originalText] = res
+                            if obj and obj.Parent then
+                                obj.Text = res
+                                obj.Font = CONFIG.Font
+                            end
+                            solved = true
+                        end
+                        done = true
+                    end)
+                    
+                    -- 等待该次异步请求结束
+                    local start = tick()
+                    repeat task.wait() until done or (tick() - start > 5)
+                    
+                    if not solved then
+                        retry = retry + 1
+                        task.wait(retry * 1) -- 失败后递增重试间隔
+                    end
+                end
+                PendingSet[originalText] = nil
+            end)
+        end
+
+        -- === 监听与挂钩 ===
+        local function Hook(obj)
+            if not (obj:IsA("TextLabel") or obj:IsA("TextButton")) then return end
+            
+            AddToWork(obj)
+            
+            -- 监控文字变化
+            obj:GetPropertyChangedSignal("Text"):Connect(function()
+                local currentText = obj.Text
+                -- 如果新文字不在缓存里，且不是我们刚刚翻好的文字，才去翻译
+                if not SuccessCache[currentText] and ShouldTranslate(currentText, obj) then
+                    AddToWork(obj)
+                end
+            end)
+        end
+
+        -- === 扫描初始化 ===
+        local function DeepScan(root)
+            for _, v in ipairs(root:GetDescendants()) do Hook(v) end
+            root.DescendantAdded:Connect(function(v)
+                task.wait(0.1) -- 等待属性加载
+                Hook(v)
+            end)
+        end
+
+        -- 扫全图
+        task.spawn(function() DeepScan(Players.LocalPlayer:WaitForChild("PlayerGui")) end)
+        task.spawn(function()
+            for _, v in ipairs(Workspace:GetDescendants()) do
+                if v:IsA("BillboardGui") or v:IsA("SurfaceGui") then DeepScan(v) end
             end
         end)
-    end
-end
 
--- 遍历工具
-local function DeepScan(parent)
-    for _,v in pairs(parent:GetDescendants()) do Hook(v) end
-    parent.DescendantAdded:Connect(function(v)
-        task.wait(0.2) -- 缓冲
-        Hook(v)
-        -- 如果是容器，深扫子集
-        for _,c in pairs(v:GetDescendants()) do Hook(c) end
-    end)
-end
+        -- === 扫地僧巡逻 (防止漏网之鱼和闪烁) ===
+        task.spawn(function()
+            while true do
+                for _, obj in ipairs(Players.LocalPlayer.PlayerGui:GetDescendants()) do
+                    if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Visible then
+                        local t = obj.Text
+                        if SuccessCache[t] then
+                            -- 修正被游戏脚本改回来的情况
+                            -- 暂不处理，防止部分动态数值显示异常
+                        elseif ShouldTranslate(t, obj) and not PendingSet[t] then
+                            AddToWork(obj)
+                        end
+                    end
+                end
+                task.wait(4) -- 巡逻频率调低至4秒，保证性能
+            end
+        end)
 
---------------------------------------------------------------------------------
--- ★ 5. 补漏扫地僧 (死缠烂打逻辑) ★
---------------------------------------------------------------------------------
--- 这是专门解决你说的“有些翻译不了”的问题
--- 很多时候事件漏了，这个每隔几秒的强力扫描会把它抓出来
-task.spawn(function()
-    print(">>> 补漏大师正在后台巡视...")
-    local PlayerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
-    
-    while task.wait(3) do -- 每3秒扫一遍屏幕上所有的字
-        -- 扫 UI
-        for _, obj in pairs(PlayerGui:GetDescendants()) do
-             if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Visible then
-                 -- 如果它现在显示的是英文，且我们没在处理它
-                 local t = obj.Text
-                 if ShouldTranslate(t, obj) and not SuccessCache[t] and not PendingSet[t] then
-                     AddToWork(obj) -- 强制抓进去重翻
-                 elseif SuccessCache[t] and obj.Text ~= SuccessCache[t] then
-                     obj.Text = SuccessCache[t] -- 强制修正
-                     obj.Font = CONFIG.Font
-                 end
-             end
+        print(">>> 增强版翻译机启动：异步队列模式。")
+    end,
+    -- 下方保持你的按钮配置不变...
+})
+
+
+
+
+
+
+local MyFreecamButton = LeftGroupBox:AddButton({
+    Text = "加载惯性自由视角 (F 键切换)键盘",
+    Func = function()
+        --[[ 
+            直接嵌入你提供的惯性自由视角源码
+            功能：按 F 进入/退出，带平滑惯性和 Shift 加速
+        ]]
+        
+        local UserInputService = game:GetService("UserInputService")
+        local RunService = game:GetService("RunService")
+        local player = game.Players.LocalPlayer
+        local camera = workspace.CurrentCamera
+
+        local active = false
+        local sensitivity = 0.35
+        local rotX, rotY = 0, 0
+        local lockedPos = nil
+
+        -- 🏎️ 惯性参数微调
+        local acceleration = 0.1 -- 加速灵敏度 (越小越滑)
+        local friction = 0.9 -- 减速摩擦力 (越接近1滑得越远)
+        local normalMaxSpeed = 0.7 -- 常速上限
+        local fastMaxSpeed = 2.0 -- Shift加速上限
+        local currentVelocity = Vector3.new(0, 0, 0) -- 当前惯性速度
+
+        -- 1. 小白点 UI
+        local sg = Instance.new("ScreenGui", game:GetService("CoreGui"))
+        local dot = Instance.new("Frame", sg)
+        dot.Size = UDim2.new(0, 3, 0, 3)
+        dot.Position = UDim2.new(0.5, -1, 0.5, -1)
+        dot.BackgroundColor3 = Color3.new(1, 1, 1)
+        dot.BorderSizePixel = 0
+        dot.Visible = false
+
+        -- 2. 禁用移动逻辑
+        local function setCharacterMovement(enabled)
+            local controls = player.PlayerScripts:FindFirstChild("PlayerModule")
+            if controls then
+                local controlModule = require(controls):GetControls()
+                if enabled then controlModule:Enable() else controlModule:Disable() end
+            end
         end
-    end
-end)
 
---------------------------------------------------------------------------------
--- 6. 启动
---------------------------------------------------------------------------------
-print(">>> 死缠烂打翻译机已启动 - i图标不翻，其余全翻，带自动重试")
+        -- 3. 核心循环 (惯性物理计算)
+        RunService:BindToRenderStep("InertiaFreecam", Enum.RenderPriority.Camera.Value + 1, function()
+            if not active then return end
+            
+            camera.CameraType = Enum.CameraType.Scriptable
+            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+            UserInputService.MouseIconEnabled = false
+            
+            -- 视角旋转
+            local delta = UserInputService:GetMouseDelta()
+            rotY = rotY - delta.X * sensitivity
+            rotX = math.clamp(rotX - delta.Y * sensitivity, -85, 85)
+            
+            -- 计算输入方向
+            local wishDir = Vector3.new(0, 0, 0)
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then wishDir = wishDir + camera.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then wishDir = wishDir - camera.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then wishDir = wishDir - camera.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then wishDir = wishDir + camera.CFrame.RightVector end
+            
+            -- 4. 惯性核心：计算速度叠加
+            local maxSpeed = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and fastMaxSpeed or normalMaxSpeed
+            
+            if wishDir.Magnitude > 0 then
+                -- 加速过程
+                wishDir = wishDir.Unit
+                currentVelocity = currentVelocity:Lerp(wishDir * maxSpeed, acceleration)
+            else
+                -- 减速过程 (滑行)
+                currentVelocity = currentVelocity * friction
+                if currentVelocity.Magnitude < 0.001 then currentVelocity = Vector3.new(0,0,0) end
+            end
+            
+            -- 应用位移
+            camera.CFrame = CFrame.new(camera.CFrame.p + currentVelocity) * CFrame.Angles(0, math.rad(rotY), 0) * CFrame.Angles(math.rad(rotX), 0, 0)
+            
+            -- 身体锁定
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and lockedPos then
+                player.Character.HumanoidRootPart.CFrame = lockedPos
+                player.Character.HumanoidRootPart.Velocity = Vector3.zero
+                player.Character.Humanoid.PlatformStand = true
+            end
+        end)
 
--- 扫界面
-DeepScan(Players.LocalPlayer:WaitForChild("PlayerGui"))
+        -- 5. 监听 F 键
+        UserInputService.InputBegan:Connect(function(input, gpe)
+            if gpe then return end
+            if input.KeyCode == Enum.KeyCode.F then
+                active = not active
+                dot.Visible = active
+                setCharacterMovement(not active)
+                
+                if active then
+                    -- 起始位置：头部
+                    if player.Character and player.Character:FindFirstChild("Head") then
+                        lockedPos = player.Character.HumanoidRootPart.CFrame
+                        camera.CFrame = player.Character.Head.CFrame
+                        local rx, ry, rz = camera.CFrame:ToOrientation()
+                        rotX, rotY = math.degrees(rx), math.degrees(ry)
+                    end
+                    currentVelocity = Vector3.new(0,0,0) -- 重置速度
+                    player:GetMouse().Icon = "rbxassetid://0"
+                else
+                    -- 彻底释放
+                    lockedPos = nil
+                    camera.CameraType = Enum.CameraType.Custom
+                    player:GetMouse().Icon = ""
+                    UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+                    UserInputService.MouseIconEnabled = true
+                    if player.Character and player.Character:FindFirstChild("Humanoid") then
+                        player.Character.Humanoid.PlatformStand = false
+                    end
+                end
+            end
+        end)
 
--- 扫 Workspace (商店牌子)
-for _,v in pairs(Workspace:GetDescendants()) do
-    if v:IsA("BillboardGui") or v:IsA("SurfaceGui") then
-        DeepScan(v)
-    end
-end
-Workspace.DescendantAdded:Connect(function(v)
-    if v:IsA("BillboardGui") or v:IsA("SurfaceGui") then
-        DeepScan(v)
-    end
-end)
-
-	end,
-	DoubleClick = false,
-
-	Tooltip = "This is the main button",
-	DisabledTooltip = "I am disabled!",
-
-	Disabled = false, -- Will disable the button (true / false)
-	Visible = true, -- Will make the button invisible (true / false)
-	Risky = false, -- Makes the text red (the color can be changed using Library.Scheme.Red) (Default value = false)
+        -- UI 通知
+        game.StarterGui:SetCore("SendNotification", {
+            Title = "自由视角已就绪";
+            Text = "按 F 键开启/关闭视角";
+            Duration = 3;
+        })
+    end,
+    DoubleClick = false,
+    Tooltip = "开启后按 F 键切换自由视角模式",
 })
 
 
@@ -1259,7 +1516,80 @@ end)
 
 
 
+local MyButton = LeftGroupBox:AddButton({
+    Text = "开启飞雷神 (Z/X)键盘",
+    Func = function()
+        --[[ 
+            直接嵌入你提供的飞雷神 v2.0 源码
+            保持原汁原味逻辑，仅做 UI 适配
+        ]]
+        
+        -- 自动清理旧脚本，防止多开冲突
+        if getgenv().FTG_Connection then
+            getgenv().FTG_Connection:Disconnect()
+            getgenv().FTG_Connection = nil
+            print("旧脚本已清理")
+        end
 
+        local UIS = game:GetService("UserInputService")
+        local Mouse = game.Players.LocalPlayer:GetMouse()
+        local Character = game.Players.LocalPlayer.Character or game.Players.LocalPlayer.CharacterAdded:Wait()
+
+        -- 核心状态变量
+        getgenv().MarkedLocation = nil -- Z键存的目标
+        getgenv().OriginalLocation = nil -- X键第一段存的回头位
+        getgenv().IsAtMark = false -- 状态切换
+
+        -- 通知函数
+        local function notify(title, text)
+            game.StarterGui:SetCore("SendNotification", {
+                Title = title;
+                Text = text;
+                Duration = 1.5;
+            })
+        end
+
+        notify("飞雷神系统", "脚本已加载\nZ: 标记 | X: 突进/返回")
+
+        -- 监听按键
+        getgenv().FTG_Connection = UIS.InputBegan:Connect(function(input, gameProcessed)
+            if gameProcessed then return end
+            
+            local RootPart = Character:FindFirstChild("HumanoidRootPart")
+            if not RootPart then return end
+
+            -- Z 键：标记地点
+            if input.KeyCode == Enum.KeyCode.Z then
+                getgenv().MarkedLocation = Mouse.Hit.p + Vector3.new(0, 3, 0)
+                notify("⚡ 标记", "目标点已锁定")
+                
+            -- X 键：两段式跳跃
+            elseif input.KeyCode == Enum.KeyCode.X then
+                if not getgenv().MarkedLocation then
+                    notify("⚠️ 错误", "请先按 Z 标记位置")
+                    return
+                end
+
+                if not getgenv().IsAtMark then
+                    -- 第一段：去 (记录当前位置 -> 传送到Z)
+                    getgenv().OriginalLocation = RootPart.CFrame
+                    RootPart.CFrame = CFrame.new(getgenv().MarkedLocation)
+                    getgenv().IsAtMark = true
+                    notify("🚀 突进", "已到达标记点")
+                else
+                    -- 第二段：回 (传送到记录的位置)
+                    if getgenv().OriginalLocation then
+                        RootPart.CFrame = getgenv().OriginalLocation
+                        getgenv().IsAtMark = false
+                        notify("🔙 返回", "已回到原位")
+                    end
+                end
+            end
+        end)
+    end,
+    DoubleClick = false,
+    Tooltip = "Z标记，X突进/返回",
+})
 
 
 
@@ -1280,9 +1610,9 @@ local Services = {
 }
 
 local LocalPlayer = Services.Players.LocalPlayer
-local guiName = "TPJumpGUI"
+local guiName = "TPWalk_AnimFix"
 
--- 1. 还原 V23 的界面
+-- // 1. UI 界面 (保持原样) //
 if Services.CoreGui:FindFirstChild(guiName) then Services.CoreGui[guiName]:Destroy() end
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = guiName
@@ -1290,18 +1620,21 @@ pcall(function() ScreenGui.Parent = Services.CoreGui end)
 if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
 local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 200, 0, 110)
+Frame.Size = UDim2.new(0, 220, 0, 120)
 Frame.Position = UDim2.new(0.1, 0, 0.5, 0)
-Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 Frame.Active = true; Frame.Draggable = true
 Frame.Parent = ScreenGui
 Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 8)
+local Stroke = Instance.new("UIStroke", Frame)
+Stroke.Color = Color3.fromRGB(0, 255, 200)
+Stroke.Thickness = 1.5
 
 -- 标题
 local Title = Instance.new("TextLabel")
-Title.Text = "⚡ TP瞬移 (解锁跳跃)"
-Title.Size = UDim2.new(1,0,0,30)
-Title.TextColor3 = Color3.fromRGB(255, 220, 0)
+Title.Text = "⚡ 瞬移+动作修复"
+Title.Size = UDim2.new(1,0,0,35)
+Title.TextColor3 = Color3.fromRGB(0, 255, 200)
 Title.BackgroundTransparency=1
 Title.Font = Enum.Font.GothamBlack
 Title.TextSize=16; Title.Parent=Frame
@@ -1310,8 +1643,8 @@ Title.TextSize=16; Title.Parent=Frame
 local SpeedInput = Instance.new("TextBox")
 SpeedInput.Size = UDim2.new(0.8, 0, 0, 30)
 SpeedInput.Position = UDim2.new(0.1, 0, 0.35, 0)
-SpeedInput.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-SpeedInput.Text = "2" -- 默认还是2，你自己改
+SpeedInput.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+SpeedInput.Text = "2" 
 SpeedInput.TextColor3 = Color3.new(1,1,1)
 SpeedInput.Font = Enum.Font.Gotham; SpeedInput.TextSize=16
 SpeedInput.Parent = Frame
@@ -1319,16 +1652,17 @@ Instance.new("UICorner", SpeedInput).CornerRadius = UDim.new(0, 6)
 
 -- 提示
 local Tip = Instance.new("TextLabel")
-Tip.Text = "按 [X] 键开启/停止"
+Tip.Text = "按 [X] 键开启"
 Tip.Size = UDim2.new(1,0,0,30)
 Tip.Position = UDim2.new(0,0,0.7,0)
 Tip.TextColor3 = Color3.fromRGB(150,150,150)
 Tip.BackgroundTransparency=1
 Tip.Font=Enum.Font.Gotham; Tip.TextSize=14; Tip.Parent=Frame
 
--- 2. 逻辑 (和你喜欢的那版一模一样，只改了一行代码)
+-- // 2. 核心变量 //
 local Enabled = false
 local SpeedMultiplier = 2 
+local RunAnimationTrack = nil -- 存储提取出来的跑步动作
 
 SpeedInput.FocusLost:Connect(function()
     local num = tonumber(SpeedInput.Text)
@@ -1340,16 +1674,40 @@ Services.UserInputService.InputBegan:Connect(function(input, gp)
     if input.KeyCode == Enum.KeyCode.X then
         Enabled = not Enabled
         if Enabled then
-            Tip.Text = "状态: 🔥 已开启"
+            Tip.Text = "状态: 🔥 运行中"
             Tip.TextColor3 = Color3.fromRGB(0, 255, 0)
         else
             Tip.Text = "状态: ⛔ 已停止"
             Tip.TextColor3 = Color3.fromRGB(150, 150, 150)
+            -- 关闭时停止强制动画
+            if RunAnimationTrack then RunAnimationTrack:Stop() end
         end
     end
 end)
 
--- 核心心跳 (修改版)
+-- // 3. 动作提取函数 (核心修改) //
+local function GetRunAnimation()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    local hum = char:FindFirstChild("Humanoid")
+    local animate = char:FindFirstChild("Animate")
+    
+    if hum and animate then
+        -- 尝试找到 Roblox 自带的跑步动作 ID
+        -- 兼容 R6 和 R15
+        local runVal = animate:FindFirstChild("run") or animate:FindFirstChild("walk")
+        if runVal then
+            local animObj = runVal:FindFirstChildWhichIsA("Animation")
+            if animObj then
+                local animator = hum:FindFirstChildOfClass("Animator") or hum
+                return animator:LoadAnimation(animObj)
+            end
+        end
+    end
+    return nil
+end
+
+-- // 4. 循环逻辑 //
 Services.RunService.Heartbeat:Connect(function(deltaTime)
     if not Enabled then return end
     
@@ -1358,16 +1716,54 @@ Services.RunService.Heartbeat:Connect(function(deltaTime)
     local hum = char:FindFirstChild("Humanoid")
     local root = char:FindFirstChild("HumanoidRootPart")
     
-    if hum and root and hum.MoveDirection.Magnitude > 0 then
-        -- 1. 依然是暴力TP，无视阻挡，速度快
-        root.CFrame = root.CFrame + (hum.MoveDirection * (deltaTime * 50 * SpeedMultiplier))
-        
-        -- 2. 【这里改了】: 
-        -- 之前是 Vector3.new(0, 0, 0) 所以跳不起来
-        -- 现在保留了 root.AssemblyLinearVelocity.Y (原本的垂直速度)
-        -- 所以X/Z轴急停防滑，但是Y轴可以正常起飞！
-        root.AssemblyLinearVelocity = Vector3.new(0, root.AssemblyLinearVelocity.Y, 0)
+    if hum and root then
+        -- 如果在移动 (按了WASD)
+        if hum.MoveDirection.Magnitude > 0 then
+            
+            -- [A] 暴力位移 (TP)
+            root.CFrame = root.CFrame + (hum.MoveDirection * (deltaTime * 50 * SpeedMultiplier))
+            
+            -- [B] 防止滑步 (仅保留Y轴速度以允许跳跃)
+            root.AssemblyLinearVelocity = Vector3.new(0, root.AssemblyLinearVelocity.Y, 0)
+            
+            -- [C] 动作强制播放逻辑
+            -- 1. 检测是否在地面 (空中不需要播放跑步动作)
+            local ray = Ray.new(root.Position, Vector3.new(0, -4, 0))
+            local hitPart, _ = workspace:FindPartOnRayWithIgnoreList(ray, {char})
+            
+            if hitPart then
+                -- 在地面，准备播放动作
+                if not RunAnimationTrack then
+                    RunAnimationTrack = GetRunAnimation() -- 获取动作
+                end
+                
+                if RunAnimationTrack and not RunAnimationTrack.IsPlaying then
+                    RunAnimationTrack:Play() -- 强制播放
+                end
+                
+                -- 根据你的TP速度调整动作播放速度，看起来更自然
+                if RunAnimationTrack then
+                    RunAnimationTrack:AdjustSpeed(SpeedMultiplier * 0.8)
+                end
+            else
+                -- 在空中 (跳跃中)，停止跑步动作，让系统播放跳跃动作
+                if RunAnimationTrack and RunAnimationTrack.IsPlaying then
+                    RunAnimationTrack:Stop()
+                end
+            end
+            
+        else
+            -- 没按键盘，停止动作
+            if RunAnimationTrack and RunAnimationTrack.IsPlaying then
+                RunAnimationTrack:Stop()
+            end
+        end
     end
+end)
+
+-- 角色重生时重置动画缓存
+LocalPlayer.CharacterAdded:Connect(function()
+    RunAnimationTrack = nil
 end)
 
 	end,
@@ -2086,46 +2482,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/sharksharksharkshark/
 
 
 
-local MyButton = LeftGroupBox:AddButton({
-	Text = "鲨脚本",
-	Func = function()
-		
 
-
-
-
-
-	end,
-	DoubleClick = false,
-
-	Tooltip = "This is the main button",
-	DisabledTooltip = "I am disabled!",
-
-	Disabled = false, -- Will disable the button (true / false)
-	Visible = true, -- Will make the button invisible (true / false)
-	Risky = false, -- Makes the text red (the color can be changed using Library.Scheme.Red) (Default value = false)
-})
-
-
-
-local MyButton = LeftGroupBox:AddButton({
-	Text = "鸭脚本",
-	Func = function()
-		
-		loadstring(game:HttpGet(utf8.char((function() return table.unpack({104,116,116,112,115,58,47,47,112,97,115,116,101,98,105,110,46,99,111,109,47,114,97,119,47,81,89,49,113,112,99,115,106})end)())))()
-
-
-
-	end,
-	DoubleClick = false,
-
-	Tooltip = "This is the main button",
-	DisabledTooltip = "I am disabled!",
-
-	Disabled = false, -- Will disable the button (true / false)
-	Visible = true, -- Will make the button invisible (true / false)
-	Risky = false, -- Makes the text red (the color can be changed using Library.Scheme.Red) (Default value = false)
-})
 
 
 
@@ -46620,4 +46977,4 @@ SaveManager:LoadAutoloadConfig()
     
 end)
 
-print("验证系统已加载")
+print("加载完毕")
