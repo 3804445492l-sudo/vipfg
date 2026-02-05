@@ -6,7 +6,7 @@ local player = game.Players.LocalPlayer
 local keys = {
     ["mmnnn185"] = true,
     ["1357666805"] = true,
-    ["tab"] = true
+    ["guxuenb"] = true
 }
 
 -- 创建界面
