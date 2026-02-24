@@ -16,7 +16,7 @@ local Mouse = LocalPlayer:GetMouse()
 local IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FeiGeSystem_Final_V10_FixRot"
+ScreenGui.Name = "FeiGeSystem_Final_AnchorFix"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.IgnoreGuiInset = true
@@ -143,7 +143,7 @@ local function LoadMain()
     local Tabs = {
         General = Window:AddTab("通用", "user"), 
         Fling = Window:AddTab("甩飞", "paper-plane"),
-        Doors = Window:AddTab("doors", "home"), 
+        Doors = Window:AddTab("DOORS", "home"), 
         Scripts = Window:AddTab("脚本", "list"), 
         Settings = Window:AddTab("系统设置", "cog")
     }
@@ -174,25 +174,29 @@ local function LoadMain()
             local Root = Char:FindFirstChild("HumanoidRootPart")
             local Hum = Char:FindFirstChild("Humanoid")
             
-            if Hum then 
-                Hum.PlatformStand = false 
-                Hum.AutoRotate = true -- [修复] 强制开启自动旋转
-                Hum:ChangeState(Enum.HumanoidStateType.GettingUp) -- [修复] 强制起身状态
-            end
-
             if Root then
-                -- [修复] 强制归零所有物理速度
-                Root.Velocity = Vector3.zero
-                Root.RotVelocity = Vector3.zero
-                Root.AssemblyLinearVelocity = Vector3.zero
-                Root.AssemblyAngularVelocity = Vector3.zero -- [关键修复] 消除旋转惯性
+                Root.Anchored = true
+                Root.Velocity = Vector3.new(0,0,0)
+                Root.RotVelocity = Vector3.new(0,0,0)
+                Root.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                Root.AssemblyAngularVelocity = Vector3.new(0,0,0)
                 
                 if FlingState.OriginalPos then
                     Root.CFrame = FlingState.OriginalPos
                     FlingState.OriginalPos = nil
-                    Library:Notify("✅ 甩飞结束，已安全归位", 2)
                 end
             end
+
+            if Hum then 
+                Hum.PlatformStand = false 
+                Hum.AutoRotate = true
+                Hum:ChangeState(Enum.HumanoidStateType.Landed)
+            end
+            
+            task.delay(0.1, function()
+                if Root then Root.Anchored = false end
+                Library:Notify("✅ 甩飞结束，已安全归位", 2)
+            end)
             
             for _, v in pairs(Char:GetDescendants()) do
                 if v:IsA("BasePart") then v.CanCollide = true end
@@ -216,7 +220,7 @@ local function LoadMain()
         Library:Notify("🚀 飞哥甩飞启动: " .. TargetName, 3)
         
         MyHum.PlatformStand = true
-        MyHum.AutoRotate = false -- 甩飞时关闭自动旋转，防止干扰
+        MyHum.AutoRotate = false
 
         FlingState.Conn = RunService.Heartbeat:Connect(function()
             if not FlingState.Active or not Target or not Target.Character or not Target.Character:FindFirstChild("HumanoidRootPart") then
@@ -231,6 +235,7 @@ local function LoadMain()
                 return
             end
 
+            MyRoot.CanCollide = false
             MyRoot.CFrame = T_Root.CFrame * CFrame.new(math.random(-2,2), math.random(-2,2), math.random(-2,2)) * CFrame.Angles(math.random(0,3), math.random(0,3), math.random(0,3))
             
             local Vel = Vector3.new(9e9, 9e9, 9e9)
@@ -503,7 +508,7 @@ local function LoadMain()
     MenuGroup:AddButton("完全卸载脚本", function() Library:Unload() end)
 
     local ConfigGroup = Tabs.Settings:AddRightGroupbox("存档管理系统 (中文版)")
-    ConfigGroup:AddInput('ConfigName', { Default = 'Config', Numeric = false, Finished = false, Text = '存档名称', Tooltip = '输入配置名', Placeholder = '例如: 飞哥配置1' })
+    ConfigGroup:AddInput('ConfigName', { Default = 'Config', Numeric = false, Finished = false, Text = '存档名称', Tooltip = '输入配置名', Placeholder = '输入配置名...' })
     ConfigGroup:AddButton('保存配置', function() 
         SaveManager:Save(Options.ConfigName.Value) 
         Library:Notify("✅ 配置已保存", 3)
@@ -512,6 +517,7 @@ local function LoadMain()
         SaveManager:Load(Options.ConfigName.Value) 
         Library:Notify("🔄 配置已加载", 3)
     end)
+    ConfigGroup:AddLabel("提示: 输入名称后点击按钮即可")
 
     RunService.RenderStepped:Connect(function(dt)
         if LocalPlayer.Character then
