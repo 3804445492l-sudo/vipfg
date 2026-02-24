@@ -6,7 +6,6 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-local ContextActionService = game:GetService("ContextActionService")
 local CoreGui = game:GetService("CoreGui")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
@@ -17,7 +16,7 @@ local Mouse = LocalPlayer:GetMouse()
 local IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FeiGeSystem_Final_Integrated"
+ScreenGui.Name = "FeiGeSystem_Final_V10_FixRot"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.IgnoreGuiInset = true
@@ -169,25 +168,32 @@ local function LoadMain()
     local function EndFling()
         FlingState.Active = false
         if FlingState.Conn then FlingState.Conn:Disconnect() end
+        
         local Char = LocalPlayer.Character
         if Char then
             local Root = Char:FindFirstChild("HumanoidRootPart")
             local Hum = Char:FindFirstChild("Humanoid")
+            
             if Hum then 
                 Hum.PlatformStand = false 
-                Hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+                Hum.AutoRotate = true -- [修复] 强制开启自动旋转
+                Hum:ChangeState(Enum.HumanoidStateType.GettingUp) -- [修复] 强制起身状态
             end
+
             if Root then
-                Root.Velocity = Vector3.new(0,0,0)
-                Root.RotVelocity = Vector3.new(0,0,0)
-                Root.AssemblyLinearVelocity = Vector3.new(0,0,0)
-                Root.AssemblyAngularVelocity = Vector3.new(0,0,0)
+                -- [修复] 强制归零所有物理速度
+                Root.Velocity = Vector3.zero
+                Root.RotVelocity = Vector3.zero
+                Root.AssemblyLinearVelocity = Vector3.zero
+                Root.AssemblyAngularVelocity = Vector3.zero -- [关键修复] 消除旋转惯性
+                
                 if FlingState.OriginalPos then
                     Root.CFrame = FlingState.OriginalPos
                     FlingState.OriginalPos = nil
                     Library:Notify("✅ 甩飞结束，已安全归位", 2)
                 end
             end
+            
             for _, v in pairs(Char:GetDescendants()) do
                 if v:IsA("BasePart") then v.CanCollide = true end
             end
@@ -198,6 +204,7 @@ local function LoadMain()
     local function FlingLogic(TargetName, Mode)
         local Target = Players:FindFirstChild(TargetName)
         if not Target or not Target.Character then Library:Notify("❌ 目标无效", 2) return end
+        
         local MyChar = LocalPlayer.Character
         if not MyChar then return end
         local MyRoot = MyChar:FindFirstChild("HumanoidRootPart")
@@ -207,29 +214,39 @@ local function LoadMain()
         if not FlingState.OriginalPos then FlingState.OriginalPos = MyRoot.CFrame end
         FlingState.Active = true
         Library:Notify("🚀 飞哥甩飞启动: " .. TargetName, 3)
+        
         MyHum.PlatformStand = true
+        MyHum.AutoRotate = false -- 甩飞时关闭自动旋转，防止干扰
 
         FlingState.Conn = RunService.Heartbeat:Connect(function()
             if not FlingState.Active or not Target or not Target.Character or not Target.Character:FindFirstChild("HumanoidRootPart") then
                 EndFling()
                 return
             end
+            
             local T_Root = Target.Character.HumanoidRootPart
+            
             if T_Root.Velocity.Magnitude > 100 or (T_Root.Position - FlingState.OriginalPos.Position).Magnitude > 500 then
                 EndFling()
                 return
             end
+
             MyRoot.CFrame = T_Root.CFrame * CFrame.new(math.random(-2,2), math.random(-2,2), math.random(-2,2)) * CFrame.Angles(math.random(0,3), math.random(0,3), math.random(0,3))
+            
             local Vel = Vector3.new(9e9, 9e9, 9e9)
             MyRoot.Velocity = Vel
             MyRoot.RotVelocity = Vel
             MyRoot.AssemblyLinearVelocity = Vel
+            MyRoot.AssemblyAngularVelocity = Vel
+            
             for _, v in pairs(MyChar:GetDescendants()) do
                 if v:IsA("BasePart") then
                     v.CanCollide = false
                     v.AssemblyLinearVelocity = Vel
+                    v.AssemblyAngularVelocity = Vel
                 end
             end
+
             if MyRoot.Position.Y < -50 then EndFling() end
         end)
 
@@ -284,6 +301,7 @@ local function LoadMain()
             if Target and Target.Character and Target.Character:FindFirstChild("Humanoid") then
                 Camera.CameraSubject = Target.Character.Humanoid
             end
+            
             if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
                 LocalPlayer.Character.Humanoid.WalkSpeed = 0
                 LocalPlayer.Character.Humanoid.JumpPower = 0
@@ -302,6 +320,7 @@ local function LoadMain()
 
     local SpeedToggle = MoveBox:AddToggle('SpeedToggle', {Text='速度', Default=false})
     local NormalSlider = MoveBox:AddSlider('NormalSlider', {Text='速度值 (16-300)', Default=16, Min=16, Max=300, Rounding=0})
+    
     local SuperToggle = MoveBox:AddToggle('SuperToggle', {Text='普通速度倍率', Default=false})
     local MultiSlider = MoveBox:AddSlider('MultiSlider', {Text='倍率值 (1-10)', Default=1, Min=1, Max=10, Rounding=1})
 
@@ -311,6 +330,7 @@ local function LoadMain()
     local Mark = nil
     local function DoMark() if LocalPlayer.Character then Mark = LocalPlayer.Character.HumanoidRootPart.CFrame; Library:Notify("📍 坐标已记录", 2) end end
     local function DoTP() if LocalPlayer.Character and Mark then local old = LocalPlayer.Character.HumanoidRootPart.CFrame; LocalPlayer.Character.HumanoidRootPart.CFrame = Mark; Mark = old; Library:Notify("⚡ 已传送", 2) end end
+    
     MoveBox:AddButton({Text="飞雷神 (B标/N传)", Func=function()
         UserInputService.InputBegan:Connect(function(i,g) if g then return end if i.KeyCode==Enum.KeyCode.B then DoMark() elseif i.KeyCode==Enum.KeyCode.N then DoTP() end end)
         if IsMobile then CreateMobileButton("传", DoTP); CreateMobileButton("标", DoMark) end
@@ -329,10 +349,7 @@ local function LoadMain()
     local GhostRot = Vector2.new()
     local GhostHighlights = {}
 
-    local function ClearGhostHighlights()
-        for _, v in pairs(GhostHighlights) do v:Destroy() end
-        GhostHighlights = {}
-    end
+    local function ClearGhostHighlights() for _, v in pairs(GhostHighlights) do v:Destroy() end; GhostHighlights = {} end
 
     local function ToggleGhost()
         GhostEnabled = not GhostEnabled
@@ -349,11 +366,9 @@ local function LoadMain()
             GhostConn = RunService.BindToRenderStep("FeiGeGhost", Enum.RenderPriority.Camera.Value + 100, function(dt)
                 Camera.CameraType = Enum.CameraType.Scriptable
                 UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-                
                 local delta = UserInputService:GetMouseDelta()
                 GhostRot = GhostRot - Vector2.new(delta.Y, delta.X) * 0.4
                 GhostRot = Vector2.new(math.clamp(GhostRot.X, -89, 89), GhostRot.Y)
-                
                 local rotCF = CFrame.fromEulerAnglesYXZ(math.rad(GhostRot.X), math.rad(GhostRot.Y), 0)
                 local input = Vector3.new()
                 if UserInputService:IsKeyDown(Enum.KeyCode.W) then input = input + Vector3.new(0,0,-1) end
@@ -362,40 +377,27 @@ local function LoadMain()
                 if UserInputService:IsKeyDown(Enum.KeyCode.D) then input = input + Vector3.new(1,0,0) end
                 if UserInputService:IsKeyDown(Enum.KeyCode.E) then input = input + Vector3.new(0,1,0) end
                 if UserInputService:IsKeyDown(Enum.KeyCode.Q) then input = input + Vector3.new(0,-1,0) end
-                
                 local speed = 0.5
                 if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then speed = 2 end
-                
-                if input.Magnitude > 0 then
-                    GhostPos = GhostPos + (rotCF:VectorToWorldSpace(input) * speed)
-                end
-                
+                if input.Magnitude > 0 then GhostPos = GhostPos + (rotCF:VectorToWorldSpace(input) * speed) end
                 Camera.CFrame = CFrame.new(GhostPos) * rotCF
-                
                 for _, obj in pairs(Workspace:GetDescendants()) do
                     if obj:IsA("Model") and obj ~= LocalPlayer.Character and (obj:FindFirstChild("Humanoid") or string.find(obj.Name, "Monster")) then
                         if not obj:FindFirstChild("FeiGeGhostHL") then
-                            local hl = Instance.new("Highlight")
-                            hl.Name = "FeiGeGhostHL"
-                            hl.Adornee = obj
-                            hl.FillColor = Color3.new(1,0,0)
-                            hl.OutlineColor = Color3.new(1,1,1)
-                            hl.Parent = CoreGui
+                            local hl = Instance.new("Highlight", CoreGui)
+                            hl.Name = "FeiGeGhostHL"; hl.Adornee = obj; hl.FillColor = Color3.new(1,0,0); hl.OutlineColor = Color3.new(1,1,1)
                             table.insert(GhostHighlights, hl)
                         end
                     end
                 end
             end)
-            
             ContextActionService:BindActionAtPriority("FeiGeGhostInput", function() return Enum.ContextActionResult.Sink end, false, 20000, Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D, Enum.KeyCode.Space)
             Library:Notify("自由视角已开启", 2)
         else
             if GhostConn then RunService:UnbindFromRenderStep("FeiGeGhost") end
             ContextActionService:UnbindAction("FeiGeGhostInput")
             ClearGhostHighlights()
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                LocalPlayer.Character.HumanoidRootPart.Anchored = false
-            end
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then LocalPlayer.Character.HumanoidRootPart.Anchored = false end
             Camera.CameraType = Enum.CameraType.Custom
             Camera.CameraSubject = LocalPlayer.Character.Humanoid
             UserInputService.MouseBehavior = Enum.MouseBehavior.Default
@@ -403,10 +405,7 @@ local function LoadMain()
         end
     end
 
-    UserInputService.InputBegan:Connect(function(i,g)
-        if i.KeyCode == Enum.KeyCode.M and not g then ToggleGhost() end
-    end)
-
+    UserInputService.InputBegan:Connect(function(i,g) if i.KeyCode == Enum.KeyCode.M and not g then ToggleGhost() end end)
     VisualBox:AddButton({Text="自由视角 (按M键)", Func=ToggleGhost})
 
     VisualBox:AddToggle('RainbowBone', {Text='骨骼透视', Default=false, Callback=function(Val)
@@ -504,7 +503,7 @@ local function LoadMain()
     MenuGroup:AddButton("完全卸载脚本", function() Library:Unload() end)
 
     local ConfigGroup = Tabs.Settings:AddRightGroupbox("存档管理系统 (中文版)")
-    ConfigGroup:AddInput('ConfigName', { Default = 'Config', Numeric = false, Finished = false, Text = '存档名称', Tooltip = '输入配置名', Placeholder = '输入配置名...' })
+    ConfigGroup:AddInput('ConfigName', { Default = 'Config', Numeric = false, Finished = false, Text = '存档名称', Tooltip = '输入配置名', Placeholder = '例如: 飞哥配置1' })
     ConfigGroup:AddButton('保存配置', function() 
         SaveManager:Save(Options.ConfigName.Value) 
         Library:Notify("✅ 配置已保存", 3)
